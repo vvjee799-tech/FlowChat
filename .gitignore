@@ -1,0 +1,19 @@
+/.gradle/
+/build/
+/app/build/
+/.kotlin/
+/local.properties
+/.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Local manual-test artifacts
+/flowchat*.png
+/reference-*.png
+/window*.xml

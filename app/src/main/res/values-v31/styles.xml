@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.FlowChat" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#2563EB</item>
+        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
+    </style>
+</resources>
