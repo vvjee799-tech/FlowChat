@@ -16,6 +16,7 @@ import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.websearch.WebSearchContextFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,6 +45,10 @@ class ChatViewModel @Inject constructor(
     private val isStreaming = MutableStateFlow(false)
     private val errorMessage = MutableStateFlow<String?>(null)
     private var sendJob: Job? = null
+    private var activeAssistantMessageId: String? = null
+    private var activeAssistantContent = ""
+    private var activeAssistantReasoningContent = ""
+    private var pendingClearedInputEcho: String? = null
 
     private val baseState = combine(
         chatRepository.observeConversations(),
@@ -94,30 +99,22 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateInput(value: String) {
+        val pendingEcho = pendingClearedInputEcho
+        if (pendingEcho != null && pendingEcho == value) {
+            pendingClearedInputEcho = null
+            return
+        }
+        if (pendingEcho != null && value.isBlank() && input.value.isBlank()) {
+            input.value = ""
+            return
+        }
+        pendingClearedInputEcho = null
         input.value = value
     }
 
     fun toggleWebSearch() {
         if (!isStreaming.value) {
             webSearchEnabled.update { enabled -> !enabled }
-        }
-    }
-
-    fun toggleThinking() {
-        val conversation = uiState.value.currentConversation ?: return
-        if (isStreaming.value) return
-        viewModelScope.launch {
-            chatRepository.updateConversationSettings(
-                conversation.id,
-                conversation.assistantName,
-                conversation.assistantAvatarPath,
-                conversation.showAvatars,
-                !conversation.enableThinking,
-                conversation.systemPrompt,
-                conversation.temperature,
-                conversation.topP,
-                conversation.maxTokens
-            )
         }
     }
 
@@ -179,9 +176,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun send() {
-        val text = input.value.trim()
+        val rawText = input.value
+        val text = rawText.trim()
         val conversation = uiState.value.currentConversation ?: return
         if (text.isBlank() || isStreaming.value) return
+        pendingClearedInputEcho = rawText
         input.value = ""
         errorMessage.value = null
         sendJob = viewModelScope.launch {
@@ -206,6 +205,9 @@ class ChatViewModel @Inject constructor(
                 MessageStatus.Streaming,
                 conversation.modelName
             )
+            activeAssistantMessageId = assistant.id
+            activeAssistantContent = ""
+            activeAssistantReasoningContent = ""
             val freshConversation = chatRepository.getConversation(conversation.id) ?: conversation
             val history = chatRepository.getMessages(conversation.id)
                 .filter { it.id != assistant.id }
@@ -303,9 +305,18 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             }.onFailure { throwable ->
-                val message = throwable.userFacingChatError()
-                chatRepository.markMessageFailed(assistant.id, message)
-                errorMessage.value = message
+                if (throwable is CancellationException) {
+                    return@onFailure
+                } else {
+                    val message = throwable.userFacingChatError()
+                    chatRepository.markMessageFailed(assistant.id, message)
+                    errorMessage.value = message
+                }
+            }
+            if (activeAssistantMessageId == assistant.id) {
+                activeAssistantMessageId = null
+                activeAssistantContent = ""
+                activeAssistantReasoningContent = ""
             }
             isStreaming.value = false
         }
@@ -327,6 +338,7 @@ class ChatViewModel @Inject constructor(
                 MessageStatus.Streaming,
                 reasoning
             )
+            activeAssistantReasoningContent = reasoning
             if (index < chunks.lastIndex) {
                 delay(IncrementalDisplayDelayMillis)
             }
@@ -350,6 +362,8 @@ class ChatViewModel @Inject constructor(
                 MessageStatus.Streaming,
                 currentReasoning
             )
+            activeAssistantContent = content
+            activeAssistantReasoningContent = currentReasoning
             if (index < chunks.lastIndex) {
                 delay(IncrementalDisplayDelayMillis)
             }
@@ -374,9 +388,25 @@ class ChatViewModel @Inject constructor(
     }
 
     fun stop() {
+        val assistantId = activeAssistantMessageId
+        val stoppedContent = activeAssistantContent
+        val stoppedReasoningContent = activeAssistantReasoningContent
         sendJob?.cancel()
         sendJob = null
         isStreaming.value = false
+        if (assistantId != null) {
+            viewModelScope.launch {
+                chatRepository.updateMessage(
+                    assistantId,
+                    stoppedContent,
+                    MessageStatus.Stopped,
+                    stoppedReasoningContent
+                )
+            }
+        }
+        activeAssistantMessageId = null
+        activeAssistantContent = ""
+        activeAssistantReasoningContent = ""
     }
 
     fun retryLastFailed() {

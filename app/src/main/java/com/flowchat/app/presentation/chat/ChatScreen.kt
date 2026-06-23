@@ -50,7 +50,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -109,13 +108,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
@@ -140,6 +140,74 @@ import kotlinx.coroutines.withContext
 
 private val OriginalSettingsIcon = Icons.Default.Settings
 private const val BottomMessageAnchorKey = "bottom-message-anchor"
+
+@Composable
+private fun DrawerMenuIcon(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = 3.dp.toPx()
+        val lineStart = size.width * 0.20f
+        val topLineEnd = size.width * 0.82f
+        val bottomLineEnd = size.width * 0.58f
+        val topY = size.height * 0.40f
+        val bottomY = size.height * 0.62f
+
+        drawLine(
+            color = color,
+            start = Offset(lineStart, topY),
+            end = Offset(topLineEnd, topY),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(lineStart, bottomY),
+            end = Offset(bottomLineEnd, bottomY),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+private fun ConversationSettingsIcon(
+    color: Color,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier.semantics {
+            this.contentDescription = contentDescription
+        }
+    ) {
+        val strokeWidth = 2.dp.toPx()
+        val knobRadius = 2.7.dp.toPx()
+        val lineStart = size.width * 0.14f
+        val lineEnd = size.width * 0.86f
+        val rows = listOf(
+            Offset(size.width * 0.32f, size.height * 0.28f),
+            Offset(size.width * 0.68f, size.height * 0.50f),
+            Offset(size.width * 0.44f, size.height * 0.72f)
+        )
+
+        rows.forEach { knob ->
+            drawLine(
+                color = color,
+                start = Offset(lineStart, knob.y),
+                end = Offset(lineEnd, knob.y),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
+            drawCircle(
+                color = color,
+                radius = knobRadius,
+                center = knob
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -273,9 +341,6 @@ fun ChatScreen(
                     ),
                     title = {
                         Column(
-                            modifier = Modifier.clickable(enabled = state.currentConversation != null) {
-                                showSettings = true
-                            },
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
@@ -291,7 +356,22 @@ fun ChatScreen(
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = null)
+                            DrawerMenuIcon(
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            enabled = state.currentConversation != null,
+                            onClick = { showSettings = true }
+                        ) {
+                            ConversationSettingsIcon(
+                                color = MaterialTheme.colorScheme.onBackground,
+                                contentDescription = stringResource(R.string.conversation_settings),
+                                modifier = Modifier.size(28.dp)
+                            )
                         }
                     }
                 )
@@ -301,12 +381,10 @@ fun ChatScreen(
                     value = state.input,
                     isStreaming = state.isStreaming,
                     webSearchEnabled = state.webSearchEnabled,
-                    thinkingEnabled = state.currentConversation?.enableThinking == true,
                     onValueChange = viewModel::updateInput,
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
-                    onToggleWebSearch = viewModel::toggleWebSearch,
-                    onToggleThinking = viewModel::toggleThinking
+                    onToggleWebSearch = viewModel::toggleWebSearch
                 )
             }
         ) { padding ->
@@ -811,10 +889,10 @@ private fun ReasoningBubble(message: Message, maxWidth: Dp) {
     }
     val isStillThinking = message.status == MessageStatus.Streaming && message.content.isBlank()
     val elapsedSeconds = ((message.updatedAt - message.createdAt) / 1000L).coerceAtLeast(1L)
-    val title = if (isStillThinking) {
-        stringResource(R.string.thinking_in_progress)
-    } else {
-        stringResource(R.string.thinking_done, elapsedSeconds)
+    val title = when {
+        message.status == MessageStatus.Stopped -> stringResource(R.string.thinking_stopped)
+        isStillThinking -> stringResource(R.string.thinking_in_progress)
+        else -> stringResource(R.string.thinking_done, elapsedSeconds)
     }
 
     Card(
@@ -913,12 +991,10 @@ private fun MessageComposer(
     value: String,
     isStreaming: Boolean,
     webSearchEnabled: Boolean,
-    thinkingEnabled: Boolean,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onToggleWebSearch: () -> Unit,
-    onToggleThinking: () -> Unit
+    onToggleWebSearch: () -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -926,6 +1002,13 @@ private fun MessageComposer(
     val inputMethodManager = remember(view) {
         view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
     }
+    val hasInput = value.isNotBlank()
+    val isDarkBackground = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val sendButtonContainerColor = when {
+        isStreaming || hasInput -> if (isDarkBackground) Color.White else Color.Black
+        else -> Color(0xFFBDBDBD)
+    }
+    val sendButtonContentColor = if (isDarkBackground) Color.Black else Color.White
 
     fun showKeyboardForFocusedInput() {
         keyboardController?.show()
@@ -937,6 +1020,12 @@ private fun MessageComposer(
     fun requestFocusAndShowKeyboard() {
         focusRequester.requestFocus()
         showKeyboardForFocusedInput()
+    }
+
+    fun submitMessage() {
+        if (value.isBlank()) return
+        onSend()
+        onValueChange("")
     }
 
     Column(
@@ -986,32 +1075,25 @@ private fun MessageComposer(
                     cursorColor = MaterialTheme.colorScheme.onSurface
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                keyboardActions = KeyboardActions(onSend = { submitMessage() }),
                 maxLines = 5
             )
             IconButton(
-                onClick = if (isStreaming) onStop else onSend,
+                onClick = if (isStreaming) onStop else ::submitMessage,
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (isStreaming) {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                        CircleShape
-                    )
+                    .background(sendButtonContainerColor, CircleShape)
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = null,
-                    tint = if (isStreaming) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onPrimary
-                    }
-                )
+                if (isStreaming) {
+                    StreamingStopIcon(color = sendButtonContentColor)
+                } else {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = null,
+                        tint = sendButtonContentColor
+                    )
+                }
             }
         }
         Row(
@@ -1052,78 +1134,26 @@ private fun MessageComposer(
                     modifier = Modifier.size(24.dp)
                 )
             }
-            IconButton(
-                onClick = onToggleThinking,
-                enabled = !isStreaming,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (thinkingEnabled) {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            Color.Transparent
-                        },
-                        CircleShape
-                    )
-                    .border(
-                        BorderStroke(
-                            1.dp,
-                            if (thinkingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        CircleShape
-                    )
-            ) {
-                DeepThinkingIcon(
-                    color = if (thinkingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    contentDescription = stringResource(R.string.deep_thinking),
-                    modifier = Modifier.size(24.dp)
-                )
-            }
         }
     }
 }
 
 @Composable
-private fun DeepThinkingIcon(
+private fun StreamingStopIcon(
     color: Color,
-    contentDescription: String,
     modifier: Modifier = Modifier
 ) {
-    Canvas(
-        modifier = modifier.semantics {
-            this.contentDescription = contentDescription
-        }
-    ) {
-        val strokeWidth = 1.9.dp.toPx()
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val ovalSize = Size(width = size.width * 0.78f, height = size.height * 0.36f)
+    Canvas(modifier = modifier.size(22.dp)) {
+        val side = 16.dp.toPx()
         val topLeft = Offset(
-            x = center.x - ovalSize.width / 2f,
-            y = center.y - ovalSize.height / 2f
+            x = (size.width - side) / 2f,
+            y = (size.height - side) / 2f
         )
-        val orbitStyle = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-
-        rotate(degrees = 45f, pivot = center) {
-            drawOval(
-                color = color,
-                topLeft = topLeft,
-                size = ovalSize,
-                style = orbitStyle
-            )
-        }
-        rotate(degrees = -45f, pivot = center) {
-            drawOval(
-                color = color,
-                topLeft = topLeft,
-                size = ovalSize,
-                style = orbitStyle
-            )
-        }
-        drawCircle(
+        drawRoundRect(
             color = color,
-            radius = 2.2.dp.toPx(),
-            center = center
+            topLeft = topLeft,
+            size = Size(side, side),
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
         )
     }
 }

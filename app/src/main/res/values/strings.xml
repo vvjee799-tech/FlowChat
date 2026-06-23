@@ -62,8 +62,8 @@
     <string name="profile_name">Name</string>
     <string name="conversation_list">Conversation list</string>
     <string name="model_provider_configuration">Model provider configuration</string>
-    <string name="deep_thinking">Deep thinking</string>
     <string name="thinking_in_progress">Thinking...</string>
+    <string name="thinking_stopped">Stopped</string>
     <string name="thinking_done">Thought for %1$d sec</string>
     <string name="thinking_expand">Expand</string>
     <string name="thinking_collapse">Collapse</string>

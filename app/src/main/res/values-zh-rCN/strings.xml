@@ -62,8 +62,8 @@
     <string name="profile_name">名字</string>
     <string name="conversation_list">会话列表</string>
     <string name="model_provider_configuration">模型提供商配置</string>
-    <string name="deep_thinking">&#28145;&#24230;&#24605;&#32771;</string>
     <string name="thinking_in_progress">&#24605;&#32771;&#20013;...</string>
+    <string name="thinking_stopped">&#24050;&#20572;&#27490;</string>
     <string name="thinking_done">&#24050;&#24605;&#32771;&#65288;&#29992;&#26102;%1$d&#31186;&#65289;</string>
     <string name="thinking_expand">&#23637;&#24320;</string>
     <string name="thinking_collapse">&#25240;&#21472;</string>

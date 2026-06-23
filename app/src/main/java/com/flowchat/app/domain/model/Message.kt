@@ -13,6 +13,7 @@ enum class MessageStatus {
     Pending,
     Sent,
     Streaming,
+    Stopped,
     Complete,
     Failed
 }

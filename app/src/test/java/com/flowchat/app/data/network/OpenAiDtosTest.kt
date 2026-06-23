@@ -20,16 +20,17 @@ class OpenAiDtosTest {
     )
 
     @Test
-    fun disablesDeepSeekThinkingModeWhenConversationThinkingIsOff() {
+    fun enablesDeepSeekThinkingModeForSupportedModelsEvenWhenConversationToggleIsOff() {
         val provider = ProviderConfig(
             displayName = "DeepSeek",
             baseUrl = "https://api.deepseek.com",
             defaultModel = "deepseek-v4-flash"
         )
+        val thinkingOffRequest = request.copy(enableThinking = false)
 
-        val payload = json.encodeToString(request.toOpenAiRequest(provider))
+        val payload = json.encodeToString(thinkingOffRequest.toOpenAiRequest(provider))
 
-        assertTrue(payload.contains(""""thinking":{"type":"disabled"}"""))
+        assertTrue(payload.contains(""""thinking":{"type":"enabled"}"""))
     }
 
     @Test

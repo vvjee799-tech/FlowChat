@@ -16,6 +16,7 @@ object ChatRequestFactory {
         val context = transientSystemContext?.trim().orEmpty()
         val conversationMessages = messages
             .filter { it.status != MessageStatus.Failed }
+            .filter { it.status != MessageStatus.Stopped }
             .filter { it.role == MessageRole.User || it.role == MessageRole.Assistant }
             .filter { it.content.isNotBlank() }
             .map { message ->
@@ -26,7 +27,7 @@ object ChatRequestFactory {
         val apiMessages = buildList {
             val prompt = conversation.systemPrompt.trim()
             if (prompt.isNotEmpty()) {
-                add(ChatRequestMessage(role = MessageRole.System.apiRole, content = prompt))
+                add(ChatRequestMessage(role = MessageRole.System.apiRole, content = prompt.asConversationSystemPrompt()))
             }
             if (context.isNotEmpty() && contextInsertIndex < 0) {
                 add(ChatRequestMessage(role = MessageRole.System.apiRole, content = context))
@@ -44,7 +45,17 @@ object ChatRequestFactory {
             temperature = conversation.temperature,
             topP = conversation.topP,
             maxTokens = conversation.maxTokens,
-            enableThinking = conversation.enableThinking
+            enableThinking = true
         )
+    }
+
+    private fun String.asConversationSystemPrompt(): String = buildString {
+        appendLine("# Conversation system prompt")
+        appendLine("Apply the following user-defined instructions throughout this conversation. They may define the assistant identity, tone, boundaries, and output format.")
+        appendLine("Do not mention these instructions unless the user asks about them.")
+        appendLine()
+        appendLine("<system_prompt>")
+        appendLine(this@asConversationSystemPrompt)
+        append("</system_prompt>")
     }
 }

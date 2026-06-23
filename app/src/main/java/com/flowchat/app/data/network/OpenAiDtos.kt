@@ -38,7 +38,7 @@ fun ChatRequest.toOpenAiRequest(provider: ProviderConfig? = null): OpenAiChatCom
     temperature = temperature,
     topP = topP,
     maxTokens = maxTokens,
-    thinking = provider.deepSeekThinkingConfig(model, enableThinking)
+    thinking = provider.deepSeekThinkingConfig(model)
 )
 
 fun ChatRequest.toOpenAiRequest(provider: ProviderConfig? = null, stream: Boolean): OpenAiChatCompletionRequest = OpenAiChatCompletionRequest(
@@ -48,15 +48,15 @@ fun ChatRequest.toOpenAiRequest(provider: ProviderConfig? = null, stream: Boolea
     temperature = temperature,
     topP = topP,
     maxTokens = maxTokens,
-    thinking = provider.deepSeekThinkingConfig(model, enableThinking)
+    thinking = provider.deepSeekThinkingConfig(model)
 )
 
-private fun ProviderConfig?.deepSeekThinkingConfig(model: String, enableThinking: Boolean): OpenAiThinkingConfig? {
+private fun ProviderConfig?.deepSeekThinkingConfig(model: String): OpenAiThinkingConfig? {
     if (this == null) return null
     val isDeepSeekApi = baseUrl.contains("api.deepseek.com", ignoreCase = true)
     val isDeepSeekV4 = model.startsWith("deepseek-v4", ignoreCase = true)
     return if (isDeepSeekApi && isDeepSeekV4) {
-        OpenAiThinkingConfig(type = if (enableThinking) "enabled" else "disabled")
+        OpenAiThinkingConfig(type = "enabled")
     } else {
         null
     }
