@@ -1,6 +1,6 @@
 # FlowChat
 
-FlowChat 是一个 Android AI 聊天软件，主打“普通小白也能折腾自己的 AI 聊天应用”。
+FlowChat 是一个 Android AI 聊天软件。
 
 这个项目不是商业级产品，也不是某个官方客户端。它更像是一个娱乐向、可继续改造的小玩具：能接入 OpenAI-compatible 接口，能保存本地会话，能自定义 AI 头像、昵称、系统提示词，也会继续加入一些更有意思的玩法。
 
