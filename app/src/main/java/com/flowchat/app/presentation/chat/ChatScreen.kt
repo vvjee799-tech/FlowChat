@@ -363,15 +363,16 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        IconButton(
-                            enabled = state.currentConversation != null,
-                            onClick = { showSettings = true }
-                        ) {
-                            ConversationSettingsIcon(
-                                color = MaterialTheme.colorScheme.onBackground,
-                                contentDescription = stringResource(R.string.conversation_settings),
-                                modifier = Modifier.size(28.dp)
-                            )
+                        if (state.currentConversation != null) {
+                            IconButton(
+                                onClick = { showSettings = true }
+                            ) {
+                                ConversationSettingsIcon(
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    contentDescription = stringResource(R.string.conversation_settings),
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 )
@@ -379,6 +380,7 @@ fun ChatScreen(
             bottomBar = {
                 MessageComposer(
                     value = state.input,
+                    enabled = state.currentConversation != null,
                     isStreaming = state.isStreaming,
                     webSearchEnabled = state.webSearchEnabled,
                     onValueChange = viewModel::updateInput,
@@ -989,6 +991,7 @@ private fun StreamingJumpingDots(modifier: Modifier = Modifier) {
 @Composable
 private fun MessageComposer(
     value: String,
+    enabled: Boolean,
     isStreaming: Boolean,
     webSearchEnabled: Boolean,
     onValueChange: (String) -> Unit,
@@ -1011,6 +1014,7 @@ private fun MessageComposer(
     val sendButtonContentColor = if (isDarkBackground) Color.Black else Color.White
 
     fun showKeyboardForFocusedInput() {
+        if (!enabled) return
         keyboardController?.show()
         view.post {
             inputMethodManager.showSoftInput(view, InputMethodManager.SHOW_FORCED)
@@ -1018,11 +1022,13 @@ private fun MessageComposer(
     }
 
     fun requestFocusAndShowKeyboard() {
+        if (!enabled) return
         focusRequester.requestFocus()
         showKeyboardForFocusedInput()
     }
 
     fun submitMessage() {
+        if (!enabled) return
         if (value.isBlank()) return
         onSend()
         onValueChange("")
@@ -1043,24 +1049,26 @@ private fun MessageComposer(
         ) {
             OutlinedTextField(
                 value = value,
-                onValueChange = onValueChange,
+                onValueChange = if (enabled) onValueChange else { _ -> },
+                enabled = enabled,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(focusRequester)
                     .onFocusChanged { focusState ->
-                        if (focusState.isFocused) {
+                        if (enabled && focusState.isFocused) {
                             showKeyboardForFocusedInput()
                         }
                     }
-                    .pointerInput(keyboardController, view) {
+                    .pointerInput(enabled, keyboardController, view) {
+                        if (!enabled) return@pointerInput
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                             requestFocusAndShowKeyboard()
                         }
-                    },
+                },
                 placeholder = {
                     Text(
-                        text = stringResource(R.string.message_hint),
+                        text = stringResource(if (enabled) R.string.message_hint else R.string.create_conversation_to_chat),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
@@ -1080,6 +1088,7 @@ private fun MessageComposer(
             )
             IconButton(
                 onClick = if (isStreaming) onStop else ::submitMessage,
+                enabled = enabled || isStreaming,
                 modifier = Modifier
                     .size(52.dp)
                     .clip(CircleShape)
@@ -1103,7 +1112,7 @@ private fun MessageComposer(
         ) {
             IconButton(
                 onClick = onToggleWebSearch,
-                enabled = !isStreaming,
+                enabled = enabled && !isStreaming,
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)

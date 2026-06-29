@@ -1,11 +1,14 @@
 package com.flowchat.app.presentation.provider
 
 import com.flowchat.app.domain.model.ProviderConfig
+import com.flowchat.app.domain.provider.ProviderPreset
+import com.flowchat.app.domain.provider.ProviderTemplates
 
 const val SavedApiKeyDisplayValue = "••••••••••••••••"
 
 data class ProviderSettingsUiState(
     val providers: List<ProviderConfig> = emptyList(),
+    val providerPresets: List<ProviderPreset> = ProviderTemplates.popularPresets(),
     val selected: ProviderConfig? = null,
     val apiKey: String = "",
     val hasApiKey: Boolean = false,

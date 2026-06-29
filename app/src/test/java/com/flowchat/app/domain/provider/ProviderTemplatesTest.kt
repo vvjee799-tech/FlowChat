@@ -1,16 +1,40 @@
 package com.flowchat.app.domain.provider
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderTemplatesTest {
     @Test
-    fun exposesOnlyOneCustomEditableProvider() {
+    fun exposesOneCustomEditableProvider() {
         val provider = ProviderTemplates.defaultCustomProvider()
 
         assertEquals("provider-custom", provider.id)
-        assertEquals("Custom OpenAI-compatible", provider.displayName)
+        assertEquals("Custom configuration", provider.displayName)
         assertEquals("https://api.openai.com/v1", provider.baseUrl)
-        assertEquals("gpt-4o-mini", provider.defaultModel)
+        assertEquals("gpt-5.4-mini", provider.defaultModel)
+    }
+
+    @Test
+    fun exposesPopularProviderPresetsAsEditableFillTemplates() {
+        val presets = ProviderTemplates.popularPresets()
+
+        assertEquals(
+            listOf("preset-chatgpt", "preset-claude", "preset-deepseek", "preset-gemini"),
+            presets.map { it.id }
+        )
+        assertTrue(presets.all { it.displayName.isNotBlank() })
+        assertTrue(presets.all { it.baseUrl.startsWith("https://") })
+        assertTrue(presets.all { it.defaultModel.isNotBlank() })
+        assertEquals("ChatGPT", presets[0].displayName)
+        assertEquals("https://api.openai.com/v1", presets[0].baseUrl)
+        assertEquals("gpt-5.4-mini", presets[0].defaultModel)
+        assertEquals("Claude", presets[1].displayName)
+        assertEquals("https://api.anthropic.com/v1", presets[1].baseUrl)
+        assertEquals("claude-sonnet-4-6", presets[1].defaultModel)
+        assertEquals("DeepSeek", presets[2].displayName)
+        assertEquals("https://api.deepseek.com", presets[2].baseUrl)
+        assertEquals("deepseek-v4-flash", presets[2].defaultModel)
+        assertTrue(presets.all { it.iconResName == null })
     }
 }

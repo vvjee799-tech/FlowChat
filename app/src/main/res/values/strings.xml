@@ -9,6 +9,7 @@
     <string name="assistant_avatar">AI avatar</string>
     <string name="show_avatars">Show avatars</string>
     <string name="message_hint">Ask the current model...</string>
+    <string name="create_conversation_to_chat">Create a conversation before chatting</string>
     <string name="send">Send</string>
     <string name="stop">Stop</string>
     <string name="retry">Retry</string>
@@ -29,6 +30,8 @@
     <string name="language_zh_cn">中文</string>
     <string name="language_en">English</string>
     <string name="provider_configuration">Provider configuration</string>
+    <string name="provider_presets">Presets</string>
+    <string name="custom_configuration">Custom configuration</string>
     <string name="no_provider_selected">No provider selected</string>
     <string name="saved">Saved</string>
     <string name="create_provider_first">Create a provider first.</string>

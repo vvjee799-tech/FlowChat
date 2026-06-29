@@ -2,6 +2,7 @@ package com.flowchat.app.presentation.provider
 
 import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.data.network.ModelCatalogClient
+import com.flowchat.app.domain.provider.ProviderTemplates
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import kotlinx.coroutines.Dispatchers
@@ -159,6 +160,38 @@ class ProviderSettingsViewModelTest {
         assertTrue(state.modelOptions.isEmpty())
         assertEquals("network failed", state.modelListError)
         assertEquals(true, state.modelOptionsExpanded)
+    }
+
+    @Test
+    fun applyingPresetFillsCurrentEditableProviderWithoutSavingApiKey() = runTest(dispatcher) {
+        val original = ProviderConfig(
+            id = "provider-custom",
+            displayName = "Custom configuration",
+            baseUrl = "https://old.example.com/v1",
+            defaultModel = "old-model",
+            apiKeyAlias = "provider:provider-custom"
+        )
+        val providerRepository = FakeProviderRepository(original, savedApiKey = "saved-key")
+        val viewModel = ProviderSettingsViewModel(
+            providerRepository,
+            FakeWebSearchSettingsRepository(),
+            FakeModelCatalogClient()
+        )
+        advanceUntilIdle()
+
+        val preset = ProviderTemplates.popularPresets().first { it.id == "preset-claude" }
+        viewModel.applyPreset(preset)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.first { it.selected?.displayName == "Claude" }
+        assertEquals("provider-custom", state.selected?.id)
+        assertEquals("Claude", state.selected?.displayName)
+        assertEquals("https://api.anthropic.com/v1", state.selected?.baseUrl)
+        assertEquals("claude-sonnet-4-6", state.selected?.defaultModel)
+        assertEquals("provider:provider-custom", state.selected?.apiKeyAlias)
+        assertEquals("", state.apiKey)
+        assertEquals(true, state.hasApiKey)
+        assertEquals(0, providerRepository.upsertCount)
     }
 
     private class FakeProviderRepository(

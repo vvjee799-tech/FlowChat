@@ -15,12 +15,16 @@ import com.flowchat.app.data.network.KtorModelCatalogClient
 import com.flowchat.app.data.network.ModelCatalogClient
 import com.flowchat.app.data.network.TavilySearchClient
 import com.flowchat.app.data.network.WebSearchClient
+import com.flowchat.app.data.repository.FileMemoryRepository
+import com.flowchat.app.data.repository.FilePromptProfileRepository
 import com.flowchat.app.data.repository.KeystoreWebSearchSettingsRepository
 import com.flowchat.app.data.repository.RoomChatRepository
 import com.flowchat.app.data.repository.RoomProviderRepository
 import com.flowchat.app.data.security.ApiKeyStore
 import com.flowchat.app.data.security.KeystoreApiKeyStore
 import com.flowchat.app.domain.repository.ChatRepository
+import com.flowchat.app.domain.repository.MemoryRepository
+import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import dagger.Binds
@@ -78,6 +82,8 @@ object AppModule {
 abstract class BindingModule {
     @Binds abstract fun bindApiKeyStore(impl: KeystoreApiKeyStore): ApiKeyStore
     @Binds abstract fun bindChatRepository(impl: RoomChatRepository): ChatRepository
+    @Binds abstract fun bindMemoryRepository(impl: FileMemoryRepository): MemoryRepository
+    @Binds abstract fun bindPromptProfileRepository(impl: FilePromptProfileRepository): PromptProfileRepository
     @Binds abstract fun bindProviderRepository(impl: RoomProviderRepository): ProviderRepository
     @Binds abstract fun bindChatCompletionClient(impl: KtorOpenAiCompatibleClient): ChatCompletionClient
     @Binds abstract fun bindModelCatalogClient(impl: KtorModelCatalogClient): ModelCatalogClient

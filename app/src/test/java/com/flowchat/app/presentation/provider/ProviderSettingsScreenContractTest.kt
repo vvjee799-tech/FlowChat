@@ -18,6 +18,29 @@ class ProviderSettingsScreenContractTest {
     }
 
     @Test
+    fun providerScreenShowsPresetTemplatesAboveCustomConfiguration() {
+        val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
+        val stateSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsUiState.kt").readText()
+        val viewModelSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsViewModel.kt").readText()
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
+
+        assertTrue(stateSource.contains("providerPresets: List<ProviderPreset> = ProviderTemplates.popularPresets()"))
+        assertTrue(viewModelSource.contains("fun applyPreset(preset: ProviderPreset)"))
+        assertTrue(screenSource.contains("onApplyPreset = viewModel::applyPreset"))
+        assertTrue(screenSource.contains("ProviderPresetSection("))
+        assertTrue(screenSource.contains("R.string.provider_presets"))
+        assertTrue(screenSource.contains("R.string.custom_configuration"))
+        assertTrue(screenSource.indexOf("ProviderPresetSection(") < screenSource.indexOf("R.string.custom_configuration"))
+        assertTrue(screenSource.contains("state.providerPresets.forEach"))
+        assertTrue(screenSource.contains("onApplyPreset(preset)"))
+        assertTrue(strings.contains("<string name=\"provider_presets\">Presets</string>"))
+        assertTrue(strings.contains("<string name=\"custom_configuration\">Custom configuration</string>"))
+        assertTrue(zhStrings.contains("name=\"provider_presets\""))
+        assertTrue(zhStrings.contains("name=\"custom_configuration\""))
+    }
+
+    @Test
     fun providerScreenShowsSavedApiKeyStateWithoutRevealingSecret() {
         val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
         val stateSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsUiState.kt").readText()

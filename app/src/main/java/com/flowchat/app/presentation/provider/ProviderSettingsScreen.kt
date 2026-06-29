@@ -1,11 +1,14 @@
 package com.flowchat.app.presentation.provider
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -36,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flowchat.app.R
+import com.flowchat.app.domain.provider.ProviderPreset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +75,7 @@ fun ProviderSettingsScreen(
             onLoadModelOptions = viewModel::loadModelOptions,
             onSelectModelOption = viewModel::selectModelOption,
             onDismissModelOptions = viewModel::dismissModelOptions,
+            onApplyPreset = viewModel::applyPreset,
             onSave = viewModel::save,
             modifier = Modifier
                 .fillMaxSize()
@@ -88,6 +94,7 @@ private fun ProviderEditor(
     onLoadModelOptions: () -> Unit,
     onSelectModelOption: (String) -> Unit,
     onDismissModelOptions: () -> Unit,
+    onApplyPreset: (ProviderPreset) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -107,7 +114,11 @@ private fun ProviderEditor(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(stringResource(R.string.provider_configuration), style = MaterialTheme.typography.titleMedium)
+            ProviderPresetSection(
+                state = state,
+                onApplyPreset = onApplyPreset
+            )
+            Text(stringResource(R.string.custom_configuration), style = MaterialTheme.typography.titleMedium)
             if (provider == null) {
                 Text(stringResource(R.string.no_provider_selected))
                 return@Column
@@ -237,6 +248,32 @@ private fun ProviderEditor(
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
             Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.save))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderPresetSection(
+    state: ProviderSettingsUiState,
+    onApplyPreset: (ProviderPreset) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.provider_presets), style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            state.providerPresets.forEach { preset ->
+                OutlinedButton(
+                    onClick = { onApplyPreset(preset) },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.widthIn(min = 104.dp)
+                ) {
+                    Text(preset.displayName)
+                }
             }
         }
     }

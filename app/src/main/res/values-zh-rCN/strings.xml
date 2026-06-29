@@ -9,6 +9,7 @@
     <string name="assistant_avatar">AI 头像</string>
     <string name="show_avatars">显示头像</string>
     <string name="message_hint">向当前模型提问...</string>
+    <string name="create_conversation_to_chat">请新建会话再进行聊天</string>
     <string name="send">发送</string>
     <string name="stop">停止</string>
     <string name="retry">重试</string>
@@ -29,6 +30,8 @@
     <string name="language_zh_cn">中文</string>
     <string name="language_en">English</string>
     <string name="provider_configuration">服务商配置</string>
+    <string name="provider_presets">预设配置</string>
+    <string name="custom_configuration">自定义配置</string>
     <string name="no_provider_selected">未选择服务商</string>
     <string name="saved">已保存</string>
     <string name="create_provider_first">请先创建服务商。</string>

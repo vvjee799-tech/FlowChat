@@ -5,12 +5,16 @@ import androidx.lifecycle.viewModelScope
 import com.flowchat.app.data.network.ChatCompletionClient
 import com.flowchat.app.data.network.WebSearchClient
 import com.flowchat.app.domain.chat.ChatRequestFactory
+import com.flowchat.app.domain.memory.MemoryContextFormatter
 import com.flowchat.app.domain.model.ChatDelta
 import com.flowchat.app.domain.model.Conversation
 import com.flowchat.app.domain.model.MessageRole
 import com.flowchat.app.domain.model.MessageStatus
 import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.domain.repository.ChatRepository
+import com.flowchat.app.domain.prompt.PromptProfileConfig
+import com.flowchat.app.domain.repository.MemoryRepository
+import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.websearch.WebSearchContextFormatter
@@ -37,7 +41,9 @@ class ChatViewModel @Inject constructor(
     private val providerRepository: ProviderRepository,
     private val chatClient: ChatCompletionClient,
     private val webSearchClient: WebSearchClient,
-    private val webSearchSettingsRepository: WebSearchSettingsRepository
+    private val webSearchSettingsRepository: WebSearchSettingsRepository,
+    private val promptProfileRepository: PromptProfileRepository,
+    private val memoryRepository: MemoryRepository
 ) : ViewModel() {
     private val currentConversationId = MutableStateFlow<String?>(null)
     private val input = MutableStateFlow("")
@@ -212,11 +218,20 @@ class ChatViewModel @Inject constructor(
             val history = chatRepository.getMessages(conversation.id)
                 .filter { it.id != assistant.id }
                 .ifEmpty { listOf(user) }
+            val activeProfile = promptProfileRepository.getActiveProfile()
+            val relevantMemories = if (activeProfile.memory.enabled) {
+                MemoryContextFormatter.format(
+                    memoryRepository.retrieve(text, activeProfile.memory.topN)
+                )
+            } else {
+                emptyList()
+            }
             val searchContext = if (webSearchEnabled.value) {
                 val tavilyApiKey = webSearchSettingsRepository.getTavilyApiKey()
                 if (tavilyApiKey.isNullOrBlank()) {
                     val message = "Tavily API key is not configured."
                     chatRepository.markMessageFailed(assistant.id, message)
+                    saveMemoryIfEnabled(activeProfile, text, message)
                     errorMessage.value = message
                     isStreaming.value = false
                     return@launch
@@ -228,6 +243,7 @@ class ChatViewModel @Inject constructor(
                 }.getOrElse { throwable ->
                     val message = throwable.message?.takeIf { it.isNotBlank() } ?: "Web search failed."
                     chatRepository.markMessageFailed(assistant.id, message)
+                    saveMemoryIfEnabled(activeProfile, text, message)
                     errorMessage.value = message
                     isStreaming.value = false
                     return@launch
@@ -235,6 +251,7 @@ class ChatViewModel @Inject constructor(
                 if (searchResult.results.isEmpty()) {
                     val message = "No web search results found."
                     chatRepository.markMessageFailed(assistant.id, message)
+                    saveMemoryIfEnabled(activeProfile, text, message)
                     errorMessage.value = message
                     isStreaming.value = false
                     return@launch
@@ -243,7 +260,13 @@ class ChatViewModel @Inject constructor(
             } else {
                 null
             }
-            val request = ChatRequestFactory.create(freshConversation, history, searchContext)
+            val request = ChatRequestFactory.create(
+                freshConversation,
+                history,
+                searchContext,
+                activeProfile.thinkingFormat,
+                relevantMemories
+            )
             val apiKey = providerRepository.getApiKey(provider)
             var content = ""
             var reasoningContent = ""
@@ -288,6 +311,7 @@ class ChatViewModel @Inject constructor(
                             if (content.isBlank()) {
                                 val emptyResponseMessage = "Provider returned an empty response."
                                 chatRepository.markMessageFailed(assistant.id, emptyResponseMessage)
+                                saveMemoryIfEnabled(activeProfile, text, emptyResponseMessage)
                                 errorMessage.value = emptyResponseMessage
                             } else {
                                 chatRepository.updateMessage(
@@ -296,10 +320,12 @@ class ChatViewModel @Inject constructor(
                                     MessageStatus.Complete,
                                     reasoningContent
                                 )
+                                saveMemoryIfEnabled(activeProfile, text, content)
                             }
                         }
                         is ChatDelta.Error -> {
                             chatRepository.markMessageFailed(assistant.id, delta.message)
+                            saveMemoryIfEnabled(activeProfile, text, delta.message)
                             errorMessage.value = delta.message
                         }
                     }
@@ -310,6 +336,7 @@ class ChatViewModel @Inject constructor(
                 } else {
                     val message = throwable.userFacingChatError()
                     chatRepository.markMessageFailed(assistant.id, message)
+                    saveMemoryIfEnabled(activeProfile, text, message)
                     errorMessage.value = message
                 }
             }
@@ -384,6 +411,17 @@ class ChatViewModel @Inject constructor(
             "请求超时：模型思考时间过长或网络中断，请重试。"
         } else {
             rawMessage.ifBlank { "Request failed" }
+        }
+    }
+
+    private suspend fun saveMemoryIfEnabled(
+        profile: PromptProfileConfig,
+        userMessage: String,
+        assistantReply: String
+    ) {
+        if (!profile.memory.enabled) return
+        runCatching {
+            memoryRepository.saveTurn(userMessage, assistantReply)
         }
     }
 

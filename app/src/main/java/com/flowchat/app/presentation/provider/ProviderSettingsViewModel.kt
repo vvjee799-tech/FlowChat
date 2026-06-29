@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flowchat.app.data.network.ModelCatalogClient
 import com.flowchat.app.domain.model.ProviderConfig
+import com.flowchat.app.domain.provider.ProviderPreset
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.validation.ProviderConfigValidator
@@ -108,6 +109,27 @@ class ProviderSettingsViewModel @Inject constructor(
 
     fun updateTavilyApiKey(value: String) {
         tavilyApiKey.value = value
+    }
+
+    fun applyPreset(preset: ProviderPreset) {
+        selected.update { current ->
+            val base = current ?: ProviderConfig(
+                id = "provider-custom",
+                displayName = "Custom configuration",
+                baseUrl = "https://api.openai.com/v1",
+                defaultModel = "gpt-5.4-mini"
+            )
+            base.copy(
+                displayName = preset.displayName,
+                baseUrl = preset.baseUrl,
+                defaultModel = preset.defaultModel,
+                customHeadersJson = "{}"
+            )
+        }
+        modelOptions.value = emptyList()
+        modelOptionsExpanded.value = false
+        modelListError.value = null
+        message.value = null
     }
 
     fun loadModelOptions() {
