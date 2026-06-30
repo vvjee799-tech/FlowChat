@@ -1,9 +1,13 @@
 package com.flowchat.app.presentation.chat
 
+import android.app.AppOpsManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Process
+import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -227,6 +231,7 @@ fun ChatScreen(
     }
     var userName by remember(context, defaultUserName) { mutableStateOf(initialUserProfile.name) }
     var userAvatarPath by remember(context, defaultUserName) { mutableStateOf(initialUserProfile.avatarPath) }
+    var usageAccessGranted by remember(context) { mutableStateOf(hasUsageStatsPermission(context)) }
     var showSettings by remember { mutableStateOf(false) }
     var showUserSettings by remember { mutableStateOf(false) }
     var conversationPendingDelete by remember { mutableStateOf<Conversation?>(null) }
@@ -251,6 +256,7 @@ fun ChatScreen(
                             onClick = {
                                 scope.launch {
                                     drawerState.close()
+                                    usageAccessGranted = hasUsageStatsPermission(context)
                                     showUserSettings = true
                                 }
                             },
@@ -402,6 +408,10 @@ fun ChatScreen(
                     Spacer(Modifier.height(8.dp))
                 }
                 MessageList(messages = state.messages, assistantAvatarPath = state.currentConversation?.assistantAvatarPath, userAvatarPath = userAvatarPath, showAvatars = state.currentConversation?.showAvatars == true, modifier = Modifier.weight(1f))
+                state.toolCallStatus?.let { status ->
+                    ToolCallStatusCard(status)
+                    Spacer(Modifier.height(8.dp))
+                }
             }
         }
     }
@@ -440,6 +450,11 @@ fun ChatScreen(
             onOpenModelProviders = {
                 showUserSettings = false
                 onOpenProviders()
+            },
+            usageAccessGranted = usageAccessGranted,
+            onOpenUsageAccessSettings = {
+                usageAccessGranted = hasUsageStatsPermission(context)
+                context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
             },
             appAppearance = appAppearance,
             onAppAppearanceChange = onAppAppearanceChange
@@ -549,6 +564,8 @@ private fun UserProfileSettingsSheet(
     onDismiss: () -> Unit,
     onSave: (String, String?) -> Unit,
     onOpenModelProviders: () -> Unit,
+    usageAccessGranted: Boolean,
+    onOpenUsageAccessSettings: () -> Unit,
     appAppearance: AppAppearance,
     onAppAppearanceChange: (AppAppearance) -> Unit
 ) {
@@ -634,6 +651,13 @@ private fun UserProfileSettingsSheet(
                         onClick = onOpenModelProviders
                     )
                     HorizontalDivider()
+                    SettingsRow(
+                        title = stringResource(R.string.app_usage_access),
+                        supportingText = stringResource(R.string.life_tools_permissions),
+                        trailingText = stringResource(if (usageAccessGranted) R.string.permission_enabled else R.string.permission_open),
+                        onClick = onOpenUsageAccessSettings
+                    )
+                    HorizontalDivider()
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -713,6 +737,8 @@ private fun BackgroundModeButton(
 @Composable
 private fun SettingsRow(
     title: String,
+    supportingText: String? = null,
+    trailingText: String? = null,
     onClick: () -> Unit
 ) {
     Row(
@@ -722,11 +748,26 @@ private fun SettingsRow(
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.weight(1f)
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium
+            )
+            if (supportingText != null) {
+                Text(
+                    text = supportingText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (trailingText != null) {
+            Text(
+                text = trailingText,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
     }
 }
 
@@ -1167,6 +1208,56 @@ private fun StreamingStopIcon(
     }
 }
 
+@Composable
+private fun ToolCallStatusCard(status: ToolCallStatusUi) {
+    val textRes = when (status.phase) {
+        ToolCallPhase.Running -> R.string.tool_call_running
+        ToolCallPhase.Complete -> R.string.tool_call_complete
+        ToolCallPhase.Failed -> R.string.tool_call_failed
+    }
+    val accentColor = when (status.phase) {
+        ToolCallPhase.Running -> MaterialTheme.colorScheme.primary
+        ToolCallPhase.Complete -> MaterialTheme.colorScheme.tertiary
+        ToolCallPhase.Failed -> MaterialTheme.colorScheme.error
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(textRes, status.toolName),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                if (!status.detail.isNullOrBlank()) {
+                    Text(
+                        text = status.detail,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConversationSettingsSheet(
@@ -1469,6 +1560,16 @@ private fun saveUserProfile(context: Context, profileName: String, profileAvatar
         .putString(UserProfileNameKey, profileName.trim())
         .putString(UserProfileAvatarKey, profileAvatarPath.orEmpty())
         .apply()
+}
+
+private fun hasUsageStatsPermission(context: Context): Boolean {
+    val appOps = context.getSystemService(AppOpsManager::class.java) ?: return false
+    val mode = appOps.checkOpNoThrow(
+        AppOpsManager.OPSTR_GET_USAGE_STATS,
+        Process.myUid(),
+        context.packageName
+    )
+    return mode == AppOpsManager.MODE_ALLOWED
 }
 
 private fun copyUserAvatarToPrivateFile(context: Context, uri: Uri): String? {

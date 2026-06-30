@@ -4,6 +4,8 @@ import android.util.Log
 import com.flowchat.app.BuildConfig
 import com.flowchat.app.domain.model.ChatDelta
 import com.flowchat.app.domain.model.ChatRequest
+import com.flowchat.app.domain.model.ChatToolCall
+import com.flowchat.app.domain.model.ChatToolCallDelta
 import com.flowchat.app.domain.model.ProviderConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -36,6 +38,7 @@ class KtorOpenAiCompatibleClient @Inject constructor(
     override fun streamChat(request: ChatRequest, provider: ProviderConfig, apiKey: String?): Flow<ChatDelta> = flow {
         var sawOutput = false
         var sawError = false
+        val toolCallAccumulator = OpenAiToolCallAccumulator()
         val payload = request.toOpenAiRequest(provider, stream = true)
         if (BuildConfig.DEBUG) {
             Log.i(
@@ -79,7 +82,10 @@ class KtorOpenAiCompatibleClient @Inject constructor(
                 when (val delta = OpenAiStreamParser.parseLine(line)) {
                     null -> Unit
                     ChatDelta.Done -> {
-                        if (sawOutput) {
+                        val toolCalls = toolCallAccumulator.build()
+                        if (toolCalls.isNotEmpty()) {
+                            emit(ChatDelta.ToolCalls(toolCalls))
+                        } else if (sawOutput) {
                             emit(delta)
                         }
                         return@execute
@@ -96,6 +102,13 @@ class KtorOpenAiCompatibleClient @Inject constructor(
                         sawOutput = true
                         emit(delta)
                     }
+                    is ChatDelta.ToolCallDelta -> {
+                        toolCallAccumulator.append(delta.calls)
+                    }
+                    is ChatDelta.ToolCalls -> {
+                        emit(delta)
+                        return@execute
+                    }
                     is ChatDelta.Error -> {
                         sawError = true
                         emit(delta)
@@ -103,11 +116,14 @@ class KtorOpenAiCompatibleClient @Inject constructor(
                     }
                 }
             }
-            if (sawOutput) {
+            val toolCalls = toolCallAccumulator.build()
+            if (toolCalls.isNotEmpty()) {
+                emit(ChatDelta.ToolCalls(toolCalls))
+            } else if (sawOutput) {
                 emit(ChatDelta.Done)
             }
         }
-        if (!sawOutput && !sawError) {
+        if (!sawOutput && !sawError && toolCallAccumulator.build().isEmpty()) {
             if (BuildConfig.DEBUG) {
                 Log.i(TAG, "stream produced no content; retrying with non-streaming request")
             }
@@ -125,6 +141,8 @@ class KtorOpenAiCompatibleClient @Inject constructor(
                     emit(ChatDelta.Content(fallback.contentText))
                     emit(ChatDelta.Done)
                 }
+                is ChatDelta.ToolCalls -> emit(fallback)
+                is ChatDelta.ToolCallDelta -> Unit
                 else -> emit(fallback)
             }
         }
@@ -174,5 +192,31 @@ class KtorOpenAiCompatibleClient @Inject constructor(
         const val ChatConnectTimeoutMillis = 30_000L
         const val ChatSocketTimeoutMillis = 5 * 60 * 1000L
         const val ChatRequestTimeoutMillis = 10 * 60 * 1000L
+    }
+}
+
+private class OpenAiToolCallAccumulator {
+    private val calls = linkedMapOf<Int, MutableToolCall>()
+
+    fun append(deltas: List<ChatToolCallDelta>) {
+        deltas.forEach { delta ->
+            val call = calls.getOrPut(delta.index) { MutableToolCall() }
+            delta.id?.let { call.id = it }
+            delta.name?.let { call.name = it }
+            delta.argumentsDelta?.let { call.arguments.append(it) }
+        }
+    }
+
+    fun build(): List<ChatToolCall> =
+        calls.values.mapNotNull { call ->
+            val id = call.id ?: return@mapNotNull null
+            val name = call.name ?: return@mapNotNull null
+            ChatToolCall(id = id, name = name, arguments = call.arguments.toString())
+        }
+
+    private class MutableToolCall {
+        var id: String? = null
+        var name: String? = null
+        val arguments = StringBuilder()
     }
 }

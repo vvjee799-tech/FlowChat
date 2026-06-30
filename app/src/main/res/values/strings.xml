@@ -57,6 +57,13 @@
     <string name="background_settings">Background settings</string>
     <string name="background_light">Light</string>
     <string name="background_dark">Dark</string>
+    <string name="life_tools_permissions">Life tool permissions</string>
+    <string name="app_usage_access">App usage access</string>
+    <string name="permission_enabled">Enabled</string>
+    <string name="permission_open">Open</string>
+    <string name="tool_call_running">Calling tool: %1$s</string>
+    <string name="tool_call_complete">Tool complete: %1$s</string>
+    <string name="tool_call_failed">Tool failed: %1$s</string>
     <string name="web_search_configuration">Web search configuration</string>
     <string name="tavily_api_key">Tavily API key</string>
     <string name="web_search_on">Web search on</string>

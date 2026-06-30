@@ -57,6 +57,13 @@
     <string name="background_settings">背景设置</string>
     <string name="background_light">浅色</string>
     <string name="background_dark">深色</string>
+    <string name="life_tools_permissions">生活工具权限</string>
+    <string name="app_usage_access">应用使用情况</string>
+    <string name="permission_enabled">已开启</string>
+    <string name="permission_open">去开启</string>
+    <string name="tool_call_running">正在调用工具：%1$s</string>
+    <string name="tool_call_complete">已完成：%1$s</string>
+    <string name="tool_call_failed">工具调用失败：%1$s</string>
     <string name="web_search_configuration">联网搜索配置</string>
     <string name="tavily_api_key">Tavily API Key</string>
     <string name="web_search_on">联网搜索已开启</string>

@@ -44,7 +44,7 @@ object ChatRequestFactory {
                     add(ChatRequestMessage(role = MessageRole.System.apiRole, content = context))
                 }
                 if (index == contextInsertIndex && latestUserPrefix.isNotEmpty()) {
-                    add(message.copy(content = message.content.withLatestUserPrefix(latestUserPrefix)))
+                    add(message.copy(content = message.content.orEmpty().withLatestUserPrefix(latestUserPrefix)))
                 } else {
                     add(message)
                 }

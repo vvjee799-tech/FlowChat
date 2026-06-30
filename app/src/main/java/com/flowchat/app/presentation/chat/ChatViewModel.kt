@@ -4,19 +4,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.flowchat.app.data.network.ChatCompletionClient
 import com.flowchat.app.data.network.WebSearchClient
+import com.flowchat.app.domain.appusage.AppUsageToolFormatter
 import com.flowchat.app.domain.chat.ChatRequestFactory
 import com.flowchat.app.domain.memory.MemoryContextFormatter
 import com.flowchat.app.domain.model.ChatDelta
+import com.flowchat.app.domain.model.ChatRequest
+import com.flowchat.app.domain.model.ChatRequestMessage
+import com.flowchat.app.domain.model.ChatToolCall
 import com.flowchat.app.domain.model.Conversation
 import com.flowchat.app.domain.model.MessageRole
 import com.flowchat.app.domain.model.MessageStatus
 import com.flowchat.app.domain.model.ProviderConfig
+import com.flowchat.app.domain.repository.AppUsageReader
 import com.flowchat.app.domain.repository.ChatRepository
 import com.flowchat.app.domain.prompt.PromptProfileConfig
 import com.flowchat.app.domain.repository.MemoryRepository
 import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
+import com.flowchat.app.domain.tools.AgentToolDefinitions
 import com.flowchat.app.domain.websearch.WebSearchContextFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -33,6 +39,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -42,6 +52,7 @@ class ChatViewModel @Inject constructor(
     private val chatClient: ChatCompletionClient,
     private val webSearchClient: WebSearchClient,
     private val webSearchSettingsRepository: WebSearchSettingsRepository,
+    private val appUsageReader: AppUsageReader,
     private val promptProfileRepository: PromptProfileRepository,
     private val memoryRepository: MemoryRepository
 ) : ViewModel() {
@@ -50,11 +61,13 @@ class ChatViewModel @Inject constructor(
     private val webSearchEnabled = MutableStateFlow(false)
     private val isStreaming = MutableStateFlow(false)
     private val errorMessage = MutableStateFlow<String?>(null)
+    private val toolCallStatus = MutableStateFlow<ToolCallStatusUi?>(null)
     private var sendJob: Job? = null
     private var activeAssistantMessageId: String? = null
     private var activeAssistantContent = ""
     private var activeAssistantReasoningContent = ""
     private var pendingClearedInputEcho: String? = null
+    private val toolJson = Json { ignoreUnknownKeys = true }
 
     private val baseState = combine(
         chatRepository.observeConversations(),
@@ -87,8 +100,17 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    val uiState = combine(
+    private val stateWithToolStatus = combine(
         stateWithoutMessages,
+        toolCallStatus
+    ) { state: ChatUiState, toolStatus: ToolCallStatusUi? ->
+        state.copy(
+            toolCallStatus = toolStatus
+        )
+    }
+
+    val uiState = combine(
+        stateWithToolStatus,
         currentConversationId.flatMapLatest { id ->
             if (id == null) flowOf(emptyList()) else chatRepository.observeMessages(id)
         }
@@ -189,6 +211,7 @@ class ChatViewModel @Inject constructor(
         pendingClearedInputEcho = rawText
         input.value = ""
         errorMessage.value = null
+        toolCallStatus.value = null
         sendJob = viewModelScope.launch {
             isStreaming.value = true
             val provider = providerRepository.getProvider(conversation.providerId)
@@ -226,109 +249,84 @@ class ChatViewModel @Inject constructor(
             } else {
                 emptyList()
             }
-            val searchContext = if (webSearchEnabled.value) {
-                val tavilyApiKey = webSearchSettingsRepository.getTavilyApiKey()
-                if (tavilyApiKey.isNullOrBlank()) {
-                    val message = "Tavily API key is not configured."
-                    chatRepository.markMessageFailed(assistant.id, message)
-                    saveMemoryIfEnabled(activeProfile, text, message)
-                    errorMessage.value = message
-                    isStreaming.value = false
-                    return@launch
-                }
-                val searchResult = runCatching {
-                    withTimeout(WebSearchTimeoutMillis) {
-                        webSearchClient.search(text, tavilyApiKey)
+            val tavilyApiKey = if (webSearchEnabled.value) {
+                webSearchSettingsRepository.getTavilyApiKey().also { key ->
+                    if (key.isNullOrBlank()) {
+                        val message = "Tavily API key is not configured."
+                        chatRepository.markMessageFailed(assistant.id, message)
+                        saveMemoryIfEnabled(activeProfile, text, message)
+                        errorMessage.value = message
+                        isStreaming.value = false
+                        return@launch
                     }
-                }.getOrElse { throwable ->
-                    val message = throwable.message?.takeIf { it.isNotBlank() } ?: "Web search failed."
-                    chatRepository.markMessageFailed(assistant.id, message)
-                    saveMemoryIfEnabled(activeProfile, text, message)
-                    errorMessage.value = message
-                    isStreaming.value = false
-                    return@launch
                 }
-                if (searchResult.results.isEmpty()) {
-                    val message = "No web search results found."
-                    chatRepository.markMessageFailed(assistant.id, message)
-                    saveMemoryIfEnabled(activeProfile, text, message)
-                    errorMessage.value = message
-                    isStreaming.value = false
-                    return@launch
-                }
-                WebSearchContextFormatter.format(searchResult)
             } else {
                 null
             }
-            val request = ChatRequestFactory.create(
+            var request = ChatRequestFactory.create(
                 freshConversation,
                 history,
-                searchContext,
+                null,
                 activeProfile.thinkingFormat,
                 relevantMemories
+            )
+            request = AgentToolDefinitions.withLifestyleTools(
+                request,
+                includeWebSearch = webSearchEnabled.value
             )
             val apiKey = providerRepository.getApiKey(provider)
             var content = ""
             var reasoningContent = ""
             runCatching {
-                chatClient.streamChat(request, provider, apiKey).collect { delta ->
-                    when (delta) {
-                        is ChatDelta.Content -> {
-                            if (content.isBlank() && reasoningContent.isNotBlank()) {
-                                delay(BatchedReasoningToContentPauseMillis)
-                            }
-                            content = appendContentDelta(
-                                assistant.id,
-                                content,
-                                reasoningContent,
-                                delta.text
-                            )
-                        }
-                        is ChatDelta.Reasoning -> {
-                            reasoningContent = appendReasoningDelta(
-                                assistant.id,
-                                content,
-                                reasoningContent,
-                                delta.text
-                            )
-                        }
-                        is ChatDelta.FullResponse -> {
-                            reasoningContent = appendReasoningDelta(
-                                assistant.id,
-                                content,
-                                reasoningContent,
-                                delta.reasoningText
-                            )
-                            delay(BatchedReasoningToContentPauseMillis)
-                            content = appendContentDelta(
-                                assistant.id,
-                                content,
-                                reasoningContent,
-                                delta.contentText
-                            )
-                        }
-                        ChatDelta.Done -> {
-                            if (content.isBlank()) {
-                                val emptyResponseMessage = "Provider returned an empty response."
-                                chatRepository.markMessageFailed(assistant.id, emptyResponseMessage)
-                                saveMemoryIfEnabled(activeProfile, text, emptyResponseMessage)
-                                errorMessage.value = emptyResponseMessage
-                            } else {
-                                chatRepository.updateMessage(
-                                    assistant.id,
-                                    content,
-                                    MessageStatus.Complete,
-                                    reasoningContent
-                                )
-                                saveMemoryIfEnabled(activeProfile, text, content)
-                            }
-                        }
-                        is ChatDelta.Error -> {
-                            chatRepository.markMessageFailed(assistant.id, delta.message)
-                            saveMemoryIfEnabled(activeProfile, text, delta.message)
-                            errorMessage.value = delta.message
-                        }
+                var toolRounds = 0
+                while (true) {
+                    val response = collectAssistantResponse(
+                        request = request,
+                        provider = provider,
+                        apiKey = apiKey,
+                        assistantId = assistant.id,
+                        currentContent = content,
+                        currentReasoning = reasoningContent
+                    )
+                    content = response.content
+                    reasoningContent = response.reasoningContent
+                    response.errorMessage?.let { message ->
+                        chatRepository.markMessageFailed(assistant.id, message)
+                        saveMemoryIfEnabled(activeProfile, text, message)
+                        errorMessage.value = message
+                        return@runCatching
                     }
+                    if (response.toolCalls.isEmpty()) {
+                        if (content.isBlank()) {
+                            val emptyResponseMessage = "Provider returned an empty response."
+                            chatRepository.markMessageFailed(assistant.id, emptyResponseMessage)
+                            saveMemoryIfEnabled(activeProfile, text, emptyResponseMessage)
+                            errorMessage.value = emptyResponseMessage
+                        } else {
+                            chatRepository.updateMessage(
+                                assistant.id,
+                                content,
+                                MessageStatus.Complete,
+                                reasoningContent
+                            )
+                            saveMemoryIfEnabled(activeProfile, text, content)
+                        }
+                        return@runCatching
+                    }
+                    if (toolRounds >= MaxToolCallRounds) {
+                        val message = "Tool call limit reached."
+                        chatRepository.markMessageFailed(assistant.id, message)
+                        saveMemoryIfEnabled(activeProfile, text, message)
+                        errorMessage.value = message
+                        return@runCatching
+                    }
+                    val toolResultMessages = executeToolCalls(response.toolCalls, tavilyApiKey.orEmpty())
+                    request = request.copy(
+                        messages = request.messages +
+                            ChatRequestMessage(role = MessageRole.Assistant.apiRole, toolCalls = response.toolCalls) +
+                            toolResultMessages
+                    )
+                    toolRounds += 1
                 }
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
@@ -348,6 +346,180 @@ class ChatViewModel @Inject constructor(
             isStreaming.value = false
         }
     }
+
+    private suspend fun collectAssistantResponse(
+        request: ChatRequest,
+        provider: ProviderConfig,
+        apiKey: String?,
+        assistantId: String,
+        currentContent: String,
+        currentReasoning: String
+    ): AssistantResponseResult {
+        var content = currentContent
+        var reasoningContent = currentReasoning
+        var toolCalls = emptyList<ChatToolCall>()
+        var error: String? = null
+        chatClient.streamChat(request, provider, apiKey).collect { delta ->
+            when (delta) {
+                is ChatDelta.Content -> {
+                    if (content.isBlank() && reasoningContent.isNotBlank()) {
+                        delay(BatchedReasoningToContentPauseMillis)
+                    }
+                    content = appendContentDelta(
+                        assistantId,
+                        content,
+                        reasoningContent,
+                        delta.text
+                    )
+                }
+                is ChatDelta.Reasoning -> {
+                    reasoningContent = appendReasoningDelta(
+                        assistantId,
+                        content,
+                        reasoningContent,
+                        delta.text
+                    )
+                }
+                is ChatDelta.FullResponse -> {
+                    reasoningContent = appendReasoningDelta(
+                        assistantId,
+                        content,
+                        reasoningContent,
+                        delta.reasoningText
+                    )
+                    delay(BatchedReasoningToContentPauseMillis)
+                    content = appendContentDelta(
+                        assistantId,
+                        content,
+                        reasoningContent,
+                        delta.contentText
+                    )
+                }
+                is ChatDelta.ToolCalls -> {
+                    toolCalls = delta.calls
+                }
+                is ChatDelta.ToolCallDelta -> Unit
+                ChatDelta.Done -> Unit
+                is ChatDelta.Error -> {
+                    error = delta.message
+                }
+            }
+        }
+        return AssistantResponseResult(
+            content = content,
+            reasoningContent = reasoningContent,
+            toolCalls = toolCalls,
+            errorMessage = error
+        )
+    }
+
+    private suspend fun executeToolCalls(
+        calls: List<ChatToolCall>,
+        tavilyApiKey: String
+    ): List<ChatRequestMessage> =
+        calls.map { call ->
+            val result = executeSingleToolCall(call, tavilyApiKey)
+            ChatRequestMessage(
+                role = "tool",
+                content = result,
+                toolCallId = call.id
+            )
+        }
+
+    private suspend fun executeSingleToolCall(call: ChatToolCall, tavilyApiKey: String): String {
+        val toolName = call.displayName()
+        toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Running)
+        return runCatching {
+            when (call.name) {
+                AgentToolDefinitions.WebSearchToolName -> executeWebSearchTool(call.arguments, tavilyApiKey)
+                AgentToolDefinitions.AppUsageSummaryToolName -> executeAppUsageSummaryTool(call.arguments)
+                AgentToolDefinitions.RecentAppActivityToolName -> executeRecentAppActivityTool(call.arguments)
+                else -> "Unsupported tool: ${call.name}"
+            }
+        }.fold(
+            onSuccess = { result ->
+                if (toolCallStatus.value?.phase == ToolCallPhase.Running) {
+                    toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Complete)
+                }
+                result
+            },
+            onFailure = { throwable ->
+                val message = throwable.message?.takeIf { it.isNotBlank() } ?: "Tool call failed."
+                toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Failed, message)
+                "Tool call failed: $message"
+            }
+        )
+    }
+
+    private suspend fun executeWebSearchTool(arguments: String, tavilyApiKey: String): String {
+        val query = parseWebSearchQuery(arguments)
+            ?: return "Invalid web_search arguments: missing query."
+        val searchResult = withTimeout(WebSearchTimeoutMillis) {
+            webSearchClient.search(query, tavilyApiKey)
+        }
+        return if (searchResult.results.isEmpty()) {
+            "No web search results found."
+        } else {
+            WebSearchContextFormatter.format(searchResult)
+        }
+    }
+
+    private suspend fun executeAppUsageSummaryTool(arguments: String): String {
+        if (!appUsageReader.hasUsageAccess()) {
+            toolCallStatus.value = ToolCallStatusUi("应用使用情况", ToolCallPhase.Failed, "未开启使用情况权限")
+            return "App usage access is not enabled. Ask the user to enable Usage Access in FlowChat settings."
+        }
+        val range = parseAppUsageRange(arguments)
+        val summary = appUsageReader.getUsageSummary(range)
+        return AppUsageToolFormatter.formatSummary(summary)
+    }
+
+    private suspend fun executeRecentAppActivityTool(arguments: String): String {
+        if (!appUsageReader.hasUsageAccess()) {
+            toolCallStatus.value = ToolCallStatusUi("最近应用活动", ToolCallPhase.Failed, "未开启使用情况权限")
+            return "App usage access is not enabled. Ask the user to enable Usage Access in FlowChat settings."
+        }
+        val hours = parseRecentActivityHours(arguments)
+        val activity = appUsageReader.getRecentActivity(hours)
+        return AppUsageToolFormatter.formatRecentActivity(activity)
+    }
+
+    private fun parseWebSearchQuery(arguments: String): String? =
+        runCatching {
+            toolJson.parseToJsonElement(arguments)
+                .jsonObject["query"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+
+    private fun parseAppUsageRange(arguments: String): String =
+        runCatching {
+            toolJson.parseToJsonElement(arguments)
+                .jsonObject["range"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.takeIf { it == "today" || it == "yesterday" || it == "last_7_days" }
+        }.getOrNull() ?: "today"
+
+    private fun parseRecentActivityHours(arguments: String): Int =
+        runCatching {
+            toolJson.parseToJsonElement(arguments)
+                .jsonObject["hours"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.toIntOrNull()
+                ?.coerceIn(1, 24)
+        }.getOrNull() ?: 6
+
+    private fun ChatToolCall.displayName(): String =
+        when (name) {
+            AgentToolDefinitions.WebSearchToolName -> "联网搜索"
+            AgentToolDefinitions.AppUsageSummaryToolName -> "应用使用情况"
+            AgentToolDefinitions.RecentAppActivityToolName -> "最近应用活动"
+            else -> name
+        }
 
     private suspend fun appendReasoningDelta(
         assistantId: String,
@@ -459,5 +631,13 @@ class ChatViewModel @Inject constructor(
         const val IncrementalDisplayChunkSize = 8
         const val IncrementalDisplayDelayMillis = 18L
         const val BatchedReasoningToContentPauseMillis = 450L
+        const val MaxToolCallRounds = 2
     }
 }
+
+private data class AssistantResponseResult(
+    val content: String,
+    val reasoningContent: String,
+    val toolCalls: List<ChatToolCall>,
+    val errorMessage: String?
+)

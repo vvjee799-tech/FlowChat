@@ -12,5 +12,18 @@ data class ChatUiState(
     val input: String = "",
     val webSearchEnabled: Boolean = false,
     val isStreaming: Boolean = false,
+    val toolCallStatus: ToolCallStatusUi? = null,
     val errorMessage: String? = null
 )
+
+data class ToolCallStatusUi(
+    val toolName: String,
+    val phase: ToolCallPhase,
+    val detail: String? = null
+)
+
+enum class ToolCallPhase {
+    Running,
+    Complete,
+    Failed
+}

@@ -229,7 +229,7 @@ class ChatScreenContractTest {
         val strings = File("src/main/res/values/strings.xml").readText()
         val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
         val sheetStart = source.indexOf("private fun UserProfileSettingsSheet(")
-        val sheetEnd = source.indexOf("@Composable\nprivate fun SettingsRow", sheetStart)
+        val sheetEnd = source.indexOf("private fun SettingsRow", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
 
         assertTrue(source.contains("import com.flowchat.app.ui.theme.AppAppearance"))
@@ -254,6 +254,35 @@ class ChatScreenContractTest {
     }
 
     @Test
+    fun userProfileSettingsContainsLifeToolPermissionEntryForUsageAccess() {
+        val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
+        val manifest = File("src/main/AndroidManifest.xml").readText()
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
+        val sheetStart = source.indexOf("private fun UserProfileSettingsSheet(")
+        val sheetEnd = source.indexOf("private fun SettingsRow", sheetStart)
+        val sheetBlock = source.substring(sheetStart, sheetEnd)
+
+        assertTrue(manifest.contains("android.permission.PACKAGE_USAGE_STATS"))
+        assertTrue(manifest.contains("xmlns:tools=\"http://schemas.android.com/tools\""))
+        assertTrue(manifest.contains("tools:ignore=\"ProtectedPermissions\""))
+        assertTrue(source.contains("Settings.ACTION_USAGE_ACCESS_SETTINGS"))
+        assertTrue(source.contains("hasUsageStatsPermission(context)"))
+        assertTrue(sheetBlock.contains("usageAccessGranted: Boolean"))
+        assertTrue(sheetBlock.contains("onOpenUsageAccessSettings: () -> Unit"))
+        assertTrue(sheetBlock.contains("R.string.life_tools_permissions"))
+        assertTrue(sheetBlock.contains("R.string.app_usage_access"))
+        assertTrue(sheetBlock.contains("R.string.permission_enabled"))
+        assertTrue(sheetBlock.contains("R.string.permission_open"))
+        assertTrue(strings.contains("<string name=\"life_tools_permissions\">Life tool permissions</string>"))
+        assertTrue(strings.contains("<string name=\"app_usage_access\">App usage access</string>"))
+        assertTrue(strings.contains("<string name=\"permission_enabled\">Enabled</string>"))
+        assertTrue(strings.contains("<string name=\"permission_open\">Open</string>"))
+        assertTrue(zhStrings.contains("name=\"life_tools_permissions\""))
+        assertTrue(zhStrings.contains("name=\"app_usage_access\""))
+    }
+
+    @Test
     fun userProfileEntryIsTransparentUntilPressedAndProfileSheetCanEditAvatarAndName() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val strings = File("src/main/res/values/strings.xml").readText()
@@ -261,7 +290,7 @@ class ChatScreenContractTest {
         val entryStart = source.indexOf("private fun UserProfileEntry(")
         val sheetStart = source.indexOf("private fun UserProfileSettingsSheet(")
         val entryBlock = source.substring(entryStart, sheetStart)
-        val sheetEnd = source.indexOf("@Composable\nprivate fun SettingsRow", sheetStart)
+        val sheetEnd = source.indexOf("private fun SettingsRow", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
 
         assertTrue(entryBlock.contains("avatarPath: String?"))
@@ -374,7 +403,7 @@ class ChatScreenContractTest {
     fun conversationSettingsKeepsSaveButtonReachableForLongSystemPrompts() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val sheetStart = source.indexOf("private fun ConversationSettingsSheet(")
-        val sheetEnd = source.indexOf("@Composable\nprivate fun LanguageSelector", sheetStart)
+        val sheetEnd = source.indexOf("private fun LanguageSelector", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
         val promptFieldStart = sheetBlock.indexOf("label = { Text(stringResource(R.string.system_prompt)) }")
         val temperatureStart = sheetBlock.indexOf("Text(\"${'$'}{stringResource(R.string.temperature)}", promptFieldStart)
@@ -421,7 +450,7 @@ class ChatScreenContractTest {
     fun conversationSettingsIncludesAssistantAvatarPickerAndNickname() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val sheetStart = source.indexOf("private fun ConversationSettingsSheet(")
-        val sheetEnd = source.indexOf("@Composable\nprivate fun LanguageSelector", sheetStart)
+        val sheetEnd = source.indexOf("private fun LanguageSelector", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
 
         assertTrue(source.contains("rememberLauncherForActivityResult(ActivityResultContracts.GetContent())"))
@@ -462,10 +491,10 @@ class ChatScreenContractTest {
         val strings = File("src/main/res/values/strings.xml").readText()
         val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
         val sheetStart = source.indexOf("private fun ConversationSettingsSheet(")
-        val sheetEnd = source.indexOf("@Composable\nprivate fun AssistantProfileEditor", sheetStart)
+        val sheetEnd = source.indexOf("private fun AssistantProfileEditor", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
         val bubbleStart = source.indexOf("private fun MessageBubble(")
-        val bubbleEnd = source.indexOf("@Composable\nprivate fun StreamingJumpingDots", bubbleStart)
+        val bubbleEnd = source.indexOf("private fun StreamingJumpingDots", bubbleStart)
         val bubbleBlock = source.substring(bubbleStart, bubbleEnd)
 
         assertTrue(modelSource.contains("val showAvatars: Boolean = false"))
@@ -504,10 +533,10 @@ class ChatScreenContractTest {
         val strings = File("src/main/res/values/strings.xml").readText()
         val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
         val sheetStart = source.indexOf("private fun ConversationSettingsSheet(")
-        val sheetEnd = source.indexOf("@Composable\nprivate fun AssistantProfileEditor", sheetStart)
+        val sheetEnd = source.indexOf("private fun AssistantProfileEditor", sheetStart)
         val sheetBlock = source.substring(sheetStart, sheetEnd)
         val bubbleStart = source.indexOf("private fun MessageBubble(")
-        val bubbleEnd = source.indexOf("@Composable\nprivate fun StreamingJumpingDots", bubbleStart)
+        val bubbleEnd = source.indexOf("private fun StreamingJumpingDots", bubbleStart)
         val bubbleBlock = source.substring(bubbleStart, bubbleEnd)
         val bottomBarStart = source.indexOf("bottomBar = {")
         val bottomBarEnd = source.indexOf(") { padding ->", bottomBarStart)
@@ -580,13 +609,13 @@ class ChatScreenContractTest {
     fun avatarEditPencilButtonsSlightlyOverlapAvatarCornerWithGrayFillAndWhitePencil() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val userSheetStart = source.indexOf("private fun UserProfileSettingsSheet(")
-        val userSheetEnd = source.indexOf("@Composable\nprivate fun SettingsRow", userSheetStart)
+        val userSheetEnd = source.indexOf("private fun SettingsRow", userSheetStart)
         val userSheetBlock = source.substring(userSheetStart, userSheetEnd)
         val assistantEditorStart = source.indexOf("private fun AssistantProfileEditor(")
-        val assistantEditorEnd = source.indexOf("@Composable\nprivate fun AvatarEditButton", assistantEditorStart)
+        val assistantEditorEnd = source.indexOf("private fun AvatarEditButton", assistantEditorStart)
         val assistantEditorBlock = source.substring(assistantEditorStart, assistantEditorEnd)
         val editButtonStart = source.indexOf("private fun AvatarEditButton(")
-        val editButtonEnd = source.indexOf("@Composable\nprivate fun ProfileAvatar", editButtonStart)
+        val editButtonEnd = source.indexOf("private fun ProfileAvatar", editButtonStart)
         val editButtonBlock = source.substring(editButtonStart, editButtonEnd)
 
         assertTrue(userSheetBlock.contains("AvatarEditButton("))
@@ -621,7 +650,7 @@ class ChatScreenContractTest {
         val strings = File("src/main/res/values/strings.xml").readText()
         val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
         val bubbleStart = source.indexOf("private fun MessageBubble(")
-        val bubbleEnd = source.indexOf("@Composable\nprivate fun StreamingJumpingDots", bubbleStart)
+        val bubbleEnd = source.indexOf("private fun StreamingJumpingDots", bubbleStart)
         val bubbleBlock = source.substring(bubbleStart, bubbleEnd)
 
         assertTrue(bubbleBlock.contains("combinedClickable("))
@@ -643,7 +672,7 @@ class ChatScreenContractTest {
     fun messageBubbleShowsSystemTimeBelowEachDialogBubble() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val bubbleStart = source.indexOf("private fun MessageBubble(")
-        val bubbleEnd = source.indexOf("@Composable\nprivate fun StreamingJumpingDots", bubbleStart)
+        val bubbleEnd = source.indexOf("private fun StreamingJumpingDots", bubbleStart)
         val bubbleBlock = source.substring(bubbleStart, bubbleEnd)
 
         assertTrue(bubbleBlock.contains("val context = LocalContext.current"))
@@ -756,7 +785,7 @@ class ChatScreenContractTest {
     }
 
     @Test
-    fun chatViewModelSearchesAndInjectsContextOnlyWhenWebSearchIsEnabled() {
+    fun chatViewModelExposesWebSearchAsAutonomousToolWhenWebSearchIsEnabled() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatViewModel.kt").readText()
 
         assertTrue(source.contains("private val webSearchEnabled = MutableStateFlow(false)"))
@@ -764,7 +793,12 @@ class ChatScreenContractTest {
         assertTrue(source.contains("fun toggleWebSearch()"))
         assertTrue(source.contains("if (!isStreaming.value)"))
         assertTrue(source.contains("webSearchSettingsRepository.getTavilyApiKey()"))
-        assertTrue(source.contains("webSearchClient.search(text, tavilyApiKey)"))
+        assertTrue(source.contains("AgentToolDefinitions.withLifestyleTools("))
+        assertTrue(source.contains("is ChatDelta.ToolCalls ->"))
+        assertTrue(source.contains("private suspend fun executeToolCalls("))
+        assertTrue(source.contains("webSearchClient.search(query, tavilyApiKey)"))
+        assertTrue(source.contains("role = \"tool\""))
+        assertTrue(source.contains("toolCallId = call.id"))
         assertTrue(source.contains("WebSearchContextFormatter.format(searchResult)"))
         assertTrue(source.contains("promptProfileRepository.getActiveProfile()"))
         assertTrue(source.contains("memoryRepository.retrieve(text, activeProfile.memory.topN)"))
@@ -775,6 +809,28 @@ class ChatScreenContractTest {
         assertTrue(source.contains("memoryRepository.saveTurn(userMessage, assistantReply)"))
         assertTrue(source.contains("Tavily API key is not configured."))
         assertTrue(source.contains("No web search results found."))
+    }
+
+    @Test
+    fun chatScreenDisplaysToolCallStatusWhenAgentUsesTools() {
+        val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
+        val uiStateSource = File("src/main/java/com/flowchat/app/presentation/chat/ChatUiState.kt").readText()
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
+
+        assertTrue(uiStateSource.contains("val toolCallStatus: ToolCallStatusUi? = null"))
+        assertTrue(source.contains("ToolCallStatusCard("))
+        assertTrue(source.contains("state.toolCallStatus"))
+        assertTrue(source.contains("private fun ToolCallStatusCard("))
+        assertTrue(source.contains("ToolCallPhase.Running"))
+        assertTrue(source.contains("ToolCallPhase.Complete"))
+        assertTrue(source.contains("ToolCallPhase.Failed"))
+        assertTrue(strings.contains("<string name=\"tool_call_running\">Calling tool: %1\$s</string>"))
+        assertTrue(strings.contains("<string name=\"tool_call_complete\">Tool complete: %1\$s</string>"))
+        assertTrue(strings.contains("<string name=\"tool_call_failed\">Tool failed: %1\$s</string>"))
+        assertTrue(zhStrings.contains("name=\"tool_call_running\""))
+        assertTrue(zhStrings.contains("name=\"tool_call_complete\""))
+        assertTrue(zhStrings.contains("name=\"tool_call_failed\""))
     }
 
     @Test

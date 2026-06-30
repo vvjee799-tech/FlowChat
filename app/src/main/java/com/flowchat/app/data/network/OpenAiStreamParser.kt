@@ -1,6 +1,8 @@
 package com.flowchat.app.data.network
 
 import com.flowchat.app.domain.model.ChatDelta
+import com.flowchat.app.domain.model.ChatToolCall
+import com.flowchat.app.domain.model.ChatToolCallDelta
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -32,9 +34,14 @@ object OpenAiStreamParser {
                 ?.get("reasoning_content")
                 ?.jsonPrimitive
                 ?.contentOrNull
+            val toolCallDeltas = choice["delta"]
+                ?.jsonObject
+                ?.extractToolCallDeltas()
+                .orEmpty()
             when {
                 !content.isNullOrEmpty() -> ChatDelta.Content(content)
                 !reasoningContent.isNullOrEmpty() -> ChatDelta.Reasoning(reasoningContent)
+                toolCallDeltas.isNotEmpty() -> ChatDelta.ToolCallDelta(toolCallDeltas)
                 choice["finish_reason"]?.jsonPrimitive?.contentOrNull != null -> ChatDelta.Done
                 else -> null
             }
@@ -54,7 +61,9 @@ object OpenAiStreamParser {
                 ?: return ChatDelta.Error("Malformed response")
             val content = message["content"]?.jsonPrimitive?.contentOrNull
             val reasoningContent = message["reasoning_content"]?.jsonPrimitive?.contentOrNull
+            val toolCalls = message.extractToolCalls()
             when {
+                toolCalls.isNotEmpty() -> ChatDelta.ToolCalls(toolCalls)
                 !reasoningContent.isNullOrBlank() && !content.isNullOrBlank() ->
                     ChatDelta.FullResponse(reasoningText = reasoningContent, contentText = content)
                 !content.isNullOrBlank() -> ChatDelta.Content(content)
@@ -79,8 +88,9 @@ object OpenAiStreamParser {
             val deltaKeys = delta?.keys?.joinToString(",").orEmpty()
             val contentLength = delta.stringLength("content")
             val reasoningLength = delta.stringLength("reasoning_content")
+            val toolCallCount = delta?.get("tool_calls")?.jsonArray?.size ?: 0
             val finishReason = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
-            "deltaKeys=[$deltaKeys] contentLength=$contentLength reasoningLength=$reasoningLength finish=$finishReason"
+            "deltaKeys=[$deltaKeys] contentLength=$contentLength reasoningLength=$reasoningLength toolCalls=$toolCallCount finish=$finishReason"
         }.getOrDefault("malformed")
     }
 
@@ -100,4 +110,33 @@ object OpenAiStreamParser {
             ?.contentOrNull
         return value?.length ?: 0
     }
+
+    private fun JsonObject.extractToolCallDeltas(): List<ChatToolCallDelta> =
+        this["tool_calls"]
+            ?.jsonArray
+            ?.mapNotNull { element ->
+                val toolCall = element.jsonObject
+                val index = toolCall["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@mapNotNull null
+                val function = toolCall["function"]?.jsonObject
+                ChatToolCallDelta(
+                    index = index,
+                    id = toolCall["id"]?.jsonPrimitive?.contentOrNull,
+                    name = function?.get("name")?.jsonPrimitive?.contentOrNull,
+                    argumentsDelta = function?.get("arguments")?.jsonPrimitive?.contentOrNull
+                )
+            }
+            .orEmpty()
+
+    private fun JsonObject.extractToolCalls(): List<ChatToolCall> =
+        this["tool_calls"]
+            ?.jsonArray
+            ?.mapNotNull { element ->
+                val toolCall = element.jsonObject
+                val function = toolCall["function"]?.jsonObject ?: return@mapNotNull null
+                val id = toolCall["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val name = function["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val arguments = function["arguments"]?.jsonPrimitive?.contentOrNull ?: ""
+                ChatToolCall(id = id, name = name, arguments = arguments)
+            }
+            .orEmpty()
 }

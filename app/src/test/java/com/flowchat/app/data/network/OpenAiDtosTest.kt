@@ -3,6 +3,7 @@ package com.flowchat.app.data.network
 import com.flowchat.app.domain.model.ChatRequest
 import com.flowchat.app.domain.model.ChatRequestMessage
 import com.flowchat.app.domain.model.ProviderConfig
+import com.flowchat.app.domain.tools.AgentToolDefinitions
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertFalse
@@ -84,5 +85,56 @@ class OpenAiDtosTest {
         val payload = json.encodeToString(request.toOpenAiRequest(provider, stream = false))
 
         assertTrue(payload.contains(""""stream":false"""))
+    }
+
+    @Test
+    fun serializesOpenAiCompatibleToolDefinitionsAndAutoToolChoice() {
+        val toolRequest = request.copy(
+            tools = listOf(AgentToolDefinitions.webSearch()),
+            toolChoice = "auto",
+            parallelToolCalls = false
+        )
+
+        val payload = json.encodeToString(toolRequest.toOpenAiRequest(stream = true))
+
+        assertTrue(payload.contains(""""tools":["""))
+        assertTrue(payload.contains(""""type":"function""""))
+        assertTrue(payload.contains(""""name":"web_search""""))
+        assertTrue(payload.contains(""""parameters":{"type":"object""""))
+        assertTrue(payload.contains(""""tool_choice":"auto""""))
+        assertTrue(payload.contains(""""parallel_tool_calls":false"""))
+    }
+
+    @Test
+    fun serializesAssistantToolCallAndToolResultMessages() {
+        val toolRequest = request.copy(
+            messages = listOf(
+                ChatRequestMessage(
+                    role = "assistant",
+                    toolCalls = listOf(
+                        AgentToolDefinitions.toolCall(
+                            id = "call_1",
+                            name = "web_search",
+                            arguments = """{"query":"FlowChat"}"""
+                        )
+                    )
+                ),
+                ChatRequestMessage(
+                    role = "tool",
+                    content = "search result",
+                    toolCallId = "call_1"
+                )
+            )
+        )
+
+        val payload = json.encodeToString(toolRequest.toOpenAiRequest(stream = true))
+
+        assertTrue(payload.contains(""""role":"assistant""""))
+        assertTrue(payload.contains(""""tool_calls":["""))
+        assertTrue(payload.contains(""""id":"call_1""""))
+        assertTrue(payload.contains(""""arguments":"{\"query\":\"FlowChat\"}""""))
+        assertTrue(payload.contains(""""role":"tool""""))
+        assertTrue(payload.contains(""""tool_call_id":"call_1""""))
+        assertTrue(payload.contains(""""content":"search result""""))
     }
 }
