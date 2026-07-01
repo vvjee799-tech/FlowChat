@@ -11,6 +11,7 @@ data class ProviderSettingsUiState(
     val providerPresets: List<ProviderPreset> = ProviderTemplates.popularPresets(),
     val pendingPreset: ProviderPreset? = null,
     val selected: ProviderConfig? = null,
+    val currentProvider: ProviderConfig? = null,
     val apiKey: String = "",
     val presetApiKey: String = "",
     val hasApiKey: Boolean = false,

@@ -1715,24 +1715,41 @@ private fun ProviderLogoImage(
     providerName: String?,
     modifier: Modifier = Modifier
 ) {
-    Image(
-        painter = painterResource(providerLogoRes(providerName)),
-        contentDescription = stringResource(R.string.switch_model),
-        contentScale = ContentScale.Fit,
+    Box(
         modifier = modifier
             .clip(CircleShape)
-            .padding(1.dp)
-    )
+            .padding(1.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        val logoRes = providerLogoRes(providerName)
+        if (logoRes != null) {
+            Image(
+                painter = painterResource(logoRes),
+                contentDescription = stringResource(R.string.switch_model),
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.Hub,
+                contentDescription = stringResource(R.string.switch_model),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp)
+            )
+        }
+    }
 }
 
-private fun providerLogoRes(providerName: String?): Int =
+private fun providerLogoRes(providerName: String?): Int? =
     when {
         providerName?.contains("claude", ignoreCase = true) == true -> R.drawable.provider_claude
         providerName?.contains("deep", ignoreCase = true) == true -> R.drawable.provider_deepseek
         providerName?.contains("gemini", ignoreCase = true) == true -> R.drawable.provider_gemini
         providerName?.contains("chat", ignoreCase = true) == true ||
             providerName?.contains("open", ignoreCase = true) == true -> R.drawable.provider_openai
-        else -> R.drawable.provider_openai
+        else -> null
     }
 
 @Composable

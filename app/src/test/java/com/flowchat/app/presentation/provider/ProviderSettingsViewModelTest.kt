@@ -163,6 +163,48 @@ class ProviderSettingsViewModelTest {
     }
 
     @Test
+    fun firstLaunchShowsNoCurrentConfigurationWhenOnlyBlankCustomDraftExists() = runTest(dispatcher) {
+        val providerRepository = FakeProviderRepository(ProviderTemplates.defaultCustomProvider())
+        val viewModel = ProviderSettingsViewModel(
+            providerRepository,
+            FakeWebSearchSettingsRepository(),
+            FakeModelCatalogClient()
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.first { it.selected?.id == "provider-custom" }
+        assertEquals("provider-custom", state.selected?.id)
+        assertNull(state.currentProvider)
+    }
+
+    @Test
+    fun currentConfigurationPrefersSavedValidProviderOverBlankCustomDraft() = runTest(dispatcher) {
+        val customDraft = ProviderTemplates.defaultCustomProvider()
+        val deepSeek = ProviderConfig(
+            id = "provider-deepseek",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-flash",
+            apiKeyAlias = "provider:provider-deepseek"
+        )
+        val providerRepository = FakeProviderRepository(
+            listOf(customDraft, deepSeek),
+            savedApiKeys = mapOf(deepSeek.id to "deepseek-key")
+        )
+        val viewModel = ProviderSettingsViewModel(
+            providerRepository,
+            FakeWebSearchSettingsRepository(),
+            FakeModelCatalogClient()
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.first { it.currentProvider?.id == "provider-deepseek" }
+        assertEquals("provider-custom", state.selected?.id)
+        assertEquals("provider-deepseek", state.currentProvider?.id)
+        assertEquals("DeepSeek", state.currentProvider?.displayName)
+    }
+
+    @Test
     fun applyingPresetOpensApiKeyDialogWithoutChangingCustomProvider() = runTest(dispatcher) {
         val original = ProviderConfig(
             id = "provider-custom",
@@ -210,13 +252,16 @@ class ProviderSettingsViewModelTest {
     }
 
     private class FakeProviderRepository(
-        private val provider: ProviderConfig,
-        private val savedApiKey: String? = null
+        initialProviders: List<ProviderConfig>,
+        savedApiKeys: Map<String, String> = emptyMap()
     ) : ProviderRepository {
-        private val providers = MutableStateFlow(listOf(provider))
-        private val apiKeys = mutableMapOf<String, String>().apply {
-            savedApiKey?.let { put(provider.id, it) }
-        }
+        constructor(provider: ProviderConfig, savedApiKey: String? = null) : this(
+            listOf(provider),
+            savedApiKey?.let { mapOf(provider.id to it) }.orEmpty()
+        )
+
+        private val providers = MutableStateFlow(initialProviders)
+        private val apiKeys = savedApiKeys.toMutableMap()
         var upsertCount = 0
             private set
 

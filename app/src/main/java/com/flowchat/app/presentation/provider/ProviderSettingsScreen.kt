@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flowchat.app.R
+import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.domain.provider.ProviderPreset
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,7 +108,7 @@ fun ProviderSettingsScreen(
 @Composable
 private fun ProviderEditor(
     state: ProviderSettingsUiState,
-    onUpdate: ((com.flowchat.app.domain.model.ProviderConfig) -> com.flowchat.app.domain.model.ProviderConfig) -> Unit,
+    onUpdate: ((ProviderConfig) -> ProviderConfig) -> Unit,
     onApiKey: (String) -> Unit,
     onTavilyApiKey: (String) -> Unit,
     onLoadModelOptions: () -> Unit,
@@ -139,7 +141,7 @@ private fun ProviderEditor(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        CurrentProviderCard(providerName = provider.displayName, modelName = provider.defaultModel)
+        CurrentProviderCard(provider = state.currentProvider)
         ProviderSection(title = stringResource(R.string.custom_api_configuration)) {
             OutlinedTextField(
                 value = provider.displayName,
@@ -329,8 +331,7 @@ private fun PresetApiKeyDialog(
 
 @Composable
 private fun CurrentProviderCard(
-    providerName: String,
-    modelName: String
+    provider: ProviderConfig?
 ) {
     Row(
         modifier = Modifier
@@ -342,21 +343,27 @@ private fun CurrentProviderCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ProviderLogo(providerName = providerName, modifier = Modifier.size(36.dp))
+        ProviderLogo(providerName = provider?.displayName, modifier = Modifier.size(36.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(providerName, style = MaterialTheme.typography.titleSmall, maxLines = 1)
             Text(
-                text = modelName,
+                text = provider?.displayName ?: stringResource(R.string.none),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1
+            )
+            Text(
+                text = provider?.defaultModel ?: stringResource(R.string.no_provider_selected),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
         }
-        Text(
-            text = stringResource(R.string.saved),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary
-        )
+        if (provider != null) {
+            Text(
+                text = stringResource(R.string.saved),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
     }
 }
 
@@ -424,7 +431,7 @@ private fun ProviderPresetSection(
 
 @Composable
 private fun ProviderLogo(
-    providerName: String,
+    providerName: String?,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -433,24 +440,37 @@ private fun ProviderLogo(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painterResource(providerLogoRes(providerName)),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(5.dp)
-        )
+        val logoRes = providerLogoRes(providerName)
+        if (logoRes != null) {
+            Image(
+                painter = painterResource(logoRes),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(5.dp)
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.Hub,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+            )
+        }
     }
 }
 
-private fun providerLogoRes(providerName: String): Int =
+private fun providerLogoRes(providerName: String?): Int? =
     when {
-        providerName.contains("claude", ignoreCase = true) -> R.drawable.provider_claude
-        providerName.contains("deep", ignoreCase = true) -> R.drawable.provider_deepseek
-        providerName.contains("gemini", ignoreCase = true) -> R.drawable.provider_gemini
-        providerName.contains("chat", ignoreCase = true) || providerName.contains("open", ignoreCase = true) -> R.drawable.provider_openai
-        else -> R.drawable.provider_openai
+        providerName?.contains("claude", ignoreCase = true) == true -> R.drawable.provider_claude
+        providerName?.contains("deep", ignoreCase = true) == true -> R.drawable.provider_deepseek
+        providerName?.contains("gemini", ignoreCase = true) == true -> R.drawable.provider_gemini
+        providerName?.contains("chat", ignoreCase = true) == true ||
+            providerName?.contains("open", ignoreCase = true) == true -> R.drawable.provider_openai
+        else -> null
     }
 
 @Composable

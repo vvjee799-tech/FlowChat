@@ -71,6 +71,7 @@ class ProviderSettingsViewModel @Inject constructor(
         val actualSelected = selectedProvider
             ?: providers.firstOrNull { it.id == ProviderTemplates.CUSTOM_PROVIDER_ID }
             ?: providers.firstOrNull()
+        val currentProvider = providers.currentConfiguredProvider()
         if (actualSelected != null && selectedProvider == null) {
             selected.value = actualSelected
             refreshApiKeyState(actualSelected)
@@ -79,6 +80,7 @@ class ProviderSettingsViewModel @Inject constructor(
             providers = providers,
             pendingPreset = preset,
             selected = actualSelected,
+            currentProvider = currentProvider,
             apiKey = key,
             presetApiKey = presetKey,
             hasApiKey = savedKey,
@@ -251,6 +253,14 @@ class ProviderSettingsViewModel @Inject constructor(
 
     private fun ProviderConfig.modelOptionsCacheKey(apiKey: String?): String =
         "${baseUrl.trim()}|${!apiKey.isNullOrBlank()}"
+
+    private fun List<ProviderConfig>.currentConfiguredProvider(): ProviderConfig? {
+        val validProviders = filter { provider ->
+            provider.isEnabled && ProviderConfigValidator.validate(provider).isEmpty()
+        }
+        return validProviders.firstOrNull { provider -> !provider.apiKeyAlias.isNullOrBlank() }
+            ?: validProviders.firstOrNull()
+    }
 
     private fun ProviderPreset.toProviderConfig(): ProviderConfig =
         ProviderConfig(

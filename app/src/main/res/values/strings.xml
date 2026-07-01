@@ -91,6 +91,7 @@
     <string name="strict">Strict</string>
     <string name="playful">Playful</string>
     <string name="current_configuration">Current configuration</string>
+    <string name="none">None</string>
     <string name="api_configuration">API configuration</string>
     <string name="custom_api_configuration">Custom API configuration</string>
     <string name="preset_api_key_placeholder">Enter API Key</string>

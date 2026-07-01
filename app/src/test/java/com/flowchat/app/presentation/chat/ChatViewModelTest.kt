@@ -14,6 +14,7 @@ import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.domain.model.RecentAppActivity
 import com.flowchat.app.domain.model.WebSearchResult
 import com.flowchat.app.domain.prompt.PromptProfileConfig
+import com.flowchat.app.domain.provider.ProviderTemplates
 import com.flowchat.app.domain.repository.AppUsageReader
 import com.flowchat.app.domain.repository.ChatRepository
 import com.flowchat.app.domain.repository.MemoryRepository
@@ -102,6 +103,52 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun newConversationUsesSavedValidProviderInsteadOfBlankCustomDraft() = runTest(dispatcher) {
+        val customDraft = ProviderTemplates.defaultCustomProvider()
+        val deepSeek = ProviderConfig(
+            id = "provider-deepseek",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-flash",
+            apiKeyAlias = "provider:provider-deepseek"
+        )
+        val newConversation = Conversation(
+            id = "new-conversation",
+            title = "New",
+            providerId = deepSeek.id,
+            modelName = deepSeek.defaultModel,
+            updatedAt = 2L
+        )
+        val chatRepository = FakeChatRepository(
+            initialConversations = emptyList(),
+            nextConversation = newConversation
+        )
+        val viewModel = ChatViewModel(
+            chatRepository = chatRepository,
+            providerRepository = FakeProviderRepository(
+                providers = listOf(customDraft, deepSeek),
+                apiKeys = mapOf(deepSeek.id to "deepseek-key")
+            ),
+            chatClient = FakeChatCompletionClient(),
+            webSearchClient = FakeWebSearchClient(),
+            webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
+            appUsageReader = FakeAppUsageReader(),
+            promptProfileRepository = FakePromptProfileRepository(),
+            memoryRepository = FakeMemoryRepository()
+        )
+        val collection = backgroundScope.launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.newConversation()
+        advanceUntilIdle()
+
+        assertEquals("provider-deepseek", chatRepository.lastCreateProviderId)
+        assertEquals("deepseek-v4-flash", chatRepository.lastCreateModelName)
+        assertEquals("new-conversation", viewModel.uiState.value.currentConversation?.id)
+        collection.cancel()
+    }
+
+    @Test
     fun sendingAfterModelSwitchUsesSelectedModelInRequestAndSavedMessages() = runTest(dispatcher) {
         val provider = ProviderConfig(
             id = "provider-1",
@@ -153,6 +200,10 @@ class ChatViewModelTest {
         private val conversations = linkedMapOf<String, Conversation>()
         private val messages = linkedMapOf<String, MutableList<Message>>()
         private val conversationsFlow = MutableStateFlow(initialConversations)
+        var lastCreateProviderId: String? = null
+            private set
+        var lastCreateModelName: String? = null
+            private set
 
         init {
             initialConversations.forEach { conversation ->
@@ -172,9 +223,13 @@ class ChatViewModelTest {
             messagesFor(conversationId)
 
         override suspend fun createConversation(providerId: String, modelName: String): Conversation {
-            conversations[nextConversation.id] = nextConversation
+            lastCreateProviderId = providerId
+            lastCreateModelName = modelName
+            val created = nextConversation.copy(providerId = providerId, modelName = modelName)
+            conversations[created.id] = created
             messages[nextConversation.id] = mutableListOf()
-            return nextConversation
+            conversationsFlow.value = conversations.values.sortedByDescending { it.updatedAt }
+            return created
         }
 
         override suspend fun updateConversationSettings(
@@ -236,15 +291,18 @@ class ChatViewModelTest {
     }
 
     private class FakeProviderRepository(
-        private val provider: ProviderConfig
+        private val providers: List<ProviderConfig>,
+        private val apiKeys: Map<String, String> = providers.associate { it.id to "api-key" }
     ) : ProviderRepository {
-        override fun observeProviders(): Flow<List<ProviderConfig>> = flowOf(listOf(provider))
-        override suspend fun getProvider(id: String): ProviderConfig? = provider.takeIf { it.id == id }
-        override suspend fun getProvidersOnce(): List<ProviderConfig> = listOf(provider)
+        constructor(provider: ProviderConfig) : this(listOf(provider))
+
+        override fun observeProviders(): Flow<List<ProviderConfig>> = flowOf(providers)
+        override suspend fun getProvider(id: String): ProviderConfig? = providers.firstOrNull { it.id == id }
+        override suspend fun getProvidersOnce(): List<ProviderConfig> = providers
         override suspend fun upsertProvider(config: ProviderConfig, apiKey: String?) = Unit
         override suspend fun deleteProvider(id: String) = Unit
         override suspend fun ensureTemplates() = Unit
-        override suspend fun getApiKey(config: ProviderConfig): String? = "api-key"
+        override suspend fun getApiKey(config: ProviderConfig): String? = apiKeys[config.id]
     }
 
     private class FakeChatCompletionClient : ChatCompletionClient {
