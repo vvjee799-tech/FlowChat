@@ -35,7 +35,8 @@ interface ChatRepository {
         id: String,
         content: String,
         status: MessageStatus,
-        reasoningContent: String = ""
+        reasoningContent: String = "",
+        reasoningDurationMillis: Long? = null
     )
     suspend fun markMessageFailed(id: String, error: String)
     suspend fun deleteConversation(id: String)

@@ -6,6 +6,7 @@ enum class MessageRole(val apiRole: String) {
     System("system"),
     User("user"),
     Assistant("assistant"),
+    Tool("tool"),
     Error("error")
 }
 
@@ -24,6 +25,7 @@ data class Message(
     val role: MessageRole,
     val content: String,
     val reasoningContent: String = "",
+    val reasoningDurationMillis: Long = 0L,
     val status: MessageStatus = MessageStatus.Complete,
     val modelName: String? = null,
     val createdAt: Long = System.currentTimeMillis(),

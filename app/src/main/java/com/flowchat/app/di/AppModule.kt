@@ -8,6 +8,7 @@ import com.flowchat.app.data.db.FlowChatDatabase
 import com.flowchat.app.data.db.MIGRATION_1_2
 import com.flowchat.app.data.db.MIGRATION_2_3
 import com.flowchat.app.data.db.MIGRATION_3_4
+import com.flowchat.app.data.db.MIGRATION_4_5
 import com.flowchat.app.data.db.MessageDao
 import com.flowchat.app.data.db.ProviderDao
 import com.flowchat.app.data.network.ChatCompletionClient
@@ -71,7 +72,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): FlowChatDatabase =
         Room.databaseBuilder(context, FlowChatDatabase::class.java, "flowchat.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides fun provideProviderDao(database: FlowChatDatabase): ProviderDao = database.providerDao()

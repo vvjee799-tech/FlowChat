@@ -163,7 +163,7 @@ class ProviderSettingsViewModelTest {
     }
 
     @Test
-    fun applyingPresetFillsCurrentEditableProviderWithoutSavingApiKey() = runTest(dispatcher) {
+    fun applyingPresetOpensApiKeyDialogWithoutChangingCustomProvider() = runTest(dispatcher) {
         val original = ProviderConfig(
             id = "provider-custom",
             displayName = "Custom configuration",
@@ -183,15 +183,30 @@ class ProviderSettingsViewModelTest {
         viewModel.applyPreset(preset)
         advanceUntilIdle()
 
-        val state = viewModel.uiState.first { it.selected?.displayName == "Claude" }
+        val state = viewModel.uiState.first { it.pendingPreset?.id == "preset-claude" }
         assertEquals("provider-custom", state.selected?.id)
-        assertEquals("Claude", state.selected?.displayName)
-        assertEquals("https://api.anthropic.com/v1", state.selected?.baseUrl)
-        assertEquals("claude-sonnet-4-6", state.selected?.defaultModel)
+        assertEquals("Custom configuration", state.selected?.displayName)
+        assertEquals("https://old.example.com/v1", state.selected?.baseUrl)
+        assertEquals("old-model", state.selected?.defaultModel)
         assertEquals("provider:provider-custom", state.selected?.apiKeyAlias)
         assertEquals("", state.apiKey)
+        assertEquals("", state.presetApiKey)
         assertEquals(true, state.hasApiKey)
         assertEquals(0, providerRepository.upsertCount)
+
+        viewModel.updatePresetApiKey("sk-claude")
+        viewModel.savePresetApiKey()
+        advanceUntilIdle()
+
+        val savedPreset = providerRepository.getProvider("provider-claude")
+        assertEquals("Claude", savedPreset?.displayName)
+        assertEquals("https://api.anthropic.com/v1", savedPreset?.baseUrl)
+        assertEquals("claude-sonnet-4-6", savedPreset?.defaultModel)
+        assertEquals("sk-claude", providerRepository.getApiKey(requireNotNull(savedPreset)))
+        assertEquals("Custom configuration", viewModel.uiState.value.selected?.displayName)
+        assertEquals(null, viewModel.uiState.value.pendingPreset)
+        assertEquals("", viewModel.uiState.value.presetApiKey)
+        assertEquals(1, providerRepository.upsertCount)
     }
 
     private class FakeProviderRepository(
@@ -199,6 +214,9 @@ class ProviderSettingsViewModelTest {
         private val savedApiKey: String? = null
     ) : ProviderRepository {
         private val providers = MutableStateFlow(listOf(provider))
+        private val apiKeys = mutableMapOf<String, String>().apply {
+            savedApiKey?.let { put(provider.id, it) }
+        }
         var upsertCount = 0
             private set
 
@@ -211,7 +229,11 @@ class ProviderSettingsViewModelTest {
 
         override suspend fun upsertProvider(config: ProviderConfig, apiKey: String?) {
             upsertCount += 1
-            providers.value = providers.value.filterNot { it.id == config.id } + config
+            val savedConfig = config.copy(apiKeyAlias = if (!apiKey.isNullOrBlank()) "provider:${config.id}" else config.apiKeyAlias)
+            if (!apiKey.isNullOrBlank()) {
+                apiKeys[config.id] = apiKey.trim()
+            }
+            providers.value = providers.value.filterNot { it.id == config.id } + savedConfig
         }
 
         override suspend fun deleteProvider(id: String) {
@@ -220,7 +242,7 @@ class ProviderSettingsViewModelTest {
 
         override suspend fun ensureTemplates() = Unit
 
-        override suspend fun getApiKey(config: ProviderConfig): String? = savedApiKey
+        override suspend fun getApiKey(config: ProviderConfig): String? = apiKeys[config.id]
     }
 
     private class FakeWebSearchSettingsRepository : WebSearchSettingsRepository {

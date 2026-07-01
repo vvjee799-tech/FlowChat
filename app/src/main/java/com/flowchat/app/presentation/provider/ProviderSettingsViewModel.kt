@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.flowchat.app.data.network.ModelCatalogClient
 import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.domain.provider.ProviderPreset
+import com.flowchat.app.domain.provider.ProviderTemplates
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.validation.ProviderConfigValidator
@@ -24,7 +25,9 @@ class ProviderSettingsViewModel @Inject constructor(
     private val modelCatalogClient: ModelCatalogClient
 ) : ViewModel() {
     private val selected = MutableStateFlow<ProviderConfig?>(null)
+    private val pendingPreset = MutableStateFlow<ProviderPreset?>(null)
     private val apiKey = MutableStateFlow("")
+    private val presetApiKey = MutableStateFlow("")
     private val hasApiKey = MutableStateFlow(false)
     private val tavilyApiKey = MutableStateFlow("")
     private val hasTavilyApiKey = MutableStateFlow(false)
@@ -38,7 +41,9 @@ class ProviderSettingsViewModel @Inject constructor(
     val uiState = combine(
         providerRepository.observeProviders(),
         selected,
+        pendingPreset,
         apiKey,
+        presetApiKey,
         hasApiKey,
         tavilyApiKey,
         hasTavilyApiKey,
@@ -51,25 +56,31 @@ class ProviderSettingsViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val providers = values[0] as List<ProviderConfig>
         val selectedProvider = values[1] as ProviderConfig?
-        val key = values[2] as String
-        val savedKey = values[3] as Boolean
-        val tavilyKey = values[4] as String
-        val savedTavilyKey = values[5] as Boolean
+        val preset = values[2] as ProviderPreset?
+        val key = values[3] as String
+        val presetKey = values[4] as String
+        val savedKey = values[5] as Boolean
+        val tavilyKey = values[6] as String
+        val savedTavilyKey = values[7] as Boolean
         @Suppress("UNCHECKED_CAST")
-        val options = values[6] as List<String>
-        val loadingModels = values[7] as Boolean
-        val optionsExpanded = values[8] as Boolean
-        val modelError = values[9] as String?
-        val msg = values[10] as String?
-        val actualSelected = selectedProvider ?: providers.firstOrNull()
+        val options = values[8] as List<String>
+        val loadingModels = values[9] as Boolean
+        val optionsExpanded = values[10] as Boolean
+        val modelError = values[11] as String?
+        val msg = values[12] as String?
+        val actualSelected = selectedProvider
+            ?: providers.firstOrNull { it.id == ProviderTemplates.CUSTOM_PROVIDER_ID }
+            ?: providers.firstOrNull()
         if (actualSelected != null && selectedProvider == null) {
             selected.value = actualSelected
             refreshApiKeyState(actualSelected)
         }
         ProviderSettingsUiState(
             providers = providers,
+            pendingPreset = preset,
             selected = actualSelected,
             apiKey = key,
+            presetApiKey = presetKey,
             hasApiKey = savedKey,
             tavilyApiKey = tavilyKey,
             hasTavilyApiKey = savedTavilyKey,
@@ -84,7 +95,8 @@ class ProviderSettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             providerRepository.ensureTemplates()
-            val provider = providerRepository.getProvidersOnce().firstOrNull()
+            val providers = providerRepository.getProvidersOnce()
+            val provider = providers.firstOrNull { it.id == ProviderTemplates.CUSTOM_PROVIDER_ID } ?: providers.firstOrNull()
             selected.value = provider
             hasApiKey.value = provider?.let { providerRepository.getApiKey(it) != null } ?: false
             hasTavilyApiKey.value = webSearchSettingsRepository.hasTavilyApiKey()
@@ -107,29 +119,38 @@ class ProviderSettingsViewModel @Inject constructor(
         modelListError.value = null
     }
 
+    fun updatePresetApiKey(value: String) {
+        presetApiKey.value = value
+    }
+
     fun updateTavilyApiKey(value: String) {
         tavilyApiKey.value = value
     }
 
     fun applyPreset(preset: ProviderPreset) {
-        selected.update { current ->
-            val base = current ?: ProviderConfig(
-                id = "provider-custom",
-                displayName = "Custom configuration",
-                baseUrl = "https://api.openai.com/v1",
-                defaultModel = "gpt-5.4-mini"
-            )
-            base.copy(
-                displayName = preset.displayName,
-                baseUrl = preset.baseUrl,
-                defaultModel = preset.defaultModel,
-                customHeadersJson = "{}"
-            )
-        }
-        modelOptions.value = emptyList()
-        modelOptionsExpanded.value = false
-        modelListError.value = null
+        pendingPreset.value = preset
+        presetApiKey.value = ""
         message.value = null
+    }
+
+    fun dismissPresetApiKeyDialog() {
+        pendingPreset.value = null
+        presetApiKey.value = ""
+    }
+
+    fun savePresetApiKey() {
+        val preset = pendingPreset.value ?: return
+        if (presetApiKey.value.isBlank()) {
+            message.value = "API key is required."
+            return
+        }
+        viewModelScope.launch {
+            val provider = preset.toProviderConfig()
+            providerRepository.upsertProvider(provider, presetApiKey.value.trim())
+            pendingPreset.value = null
+            presetApiKey.value = ""
+            message.value = "Saved"
+        }
     }
 
     fun loadModelOptions() {
@@ -230,4 +251,13 @@ class ProviderSettingsViewModel @Inject constructor(
 
     private fun ProviderConfig.modelOptionsCacheKey(apiKey: String?): String =
         "${baseUrl.trim()}|${!apiKey.isNullOrBlank()}"
+
+    private fun ProviderPreset.toProviderConfig(): ProviderConfig =
+        ProviderConfig(
+            id = "provider-${id.removePrefix("preset-")}",
+            displayName = displayName,
+            baseUrl = baseUrl,
+            defaultModel = defaultModel,
+            customHeadersJson = "{}"
+        )
 }

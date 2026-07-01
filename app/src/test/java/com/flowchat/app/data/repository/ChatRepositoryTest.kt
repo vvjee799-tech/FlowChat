@@ -89,6 +89,38 @@ class ChatRepositoryTest {
     }
 
     @Test
+    fun preservesReasoningDurationWhenOnlyFinalContentChanges() = runTest {
+        val conversation = repository.createConversation(providerId = "p1", modelName = "deepseek-v4-pro")
+        val assistant = repository.appendMessage(
+            conversation.id,
+            MessageRole.Assistant,
+            "",
+            MessageStatus.Streaming,
+            "deepseek-v4-pro"
+        )
+
+        repository.updateMessage(
+            id = assistant.id,
+            content = "",
+            reasoningContent = "Visible reasoning",
+            status = MessageStatus.Streaming,
+            reasoningDurationMillis = 2400L
+        )
+        repository.updateMessage(
+            id = assistant.id,
+            content = "Final answer",
+            reasoningContent = "Visible reasoning",
+            status = MessageStatus.Complete
+        )
+
+        val message = repository.observeMessages(conversation.id).first().single()
+        assertEquals("Final answer", message.content)
+        assertEquals("Visible reasoning", message.reasoningContent)
+        assertEquals(2400L, message.reasoningDurationMillis)
+        assertEquals(MessageStatus.Complete, message.status)
+    }
+
+    @Test
     fun deletesConversationWithMessages() = runTest {
         val conversation = repository.createConversation(providerId = "p1", modelName = "gpt-4o-mini")
         repository.appendMessage(conversation.id, MessageRole.User, "Hello", MessageStatus.Sent, "gpt-4o-mini")

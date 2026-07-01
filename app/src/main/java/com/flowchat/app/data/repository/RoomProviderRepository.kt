@@ -49,18 +49,15 @@ class RoomProviderRepository @Inject constructor(
         val existing = providerDao.getAllProvidersOnce().map { it.toDomain() }
         val seed = existing.firstOrNull { it.id == ProviderTemplates.CUSTOM_PROVIDER_ID }
             ?: existing.firstOrNull { it.id == "template-custom" }
-            ?: existing.firstOrNull()
             ?: ProviderTemplates.defaultCustomProvider()
         val custom = seed.copy(
             id = ProviderTemplates.CUSTOM_PROVIDER_ID,
             displayName = seed.displayName.ifBlank { "Custom OpenAI-compatible" },
-            baseUrl = seed.baseUrl.ifBlank { "https://api.openai.com/v1" },
-            defaultModel = seed.defaultModel.ifBlank { "gpt-4o-mini" },
+            baseUrl = seed.baseUrl,
+            defaultModel = seed.defaultModel,
             updatedAt = System.currentTimeMillis()
         )
         providerDao.upsert(custom.toEntity())
-        providerDao.deleteAllExcept(custom.id)
-        conversationDao.pointAllToProvider(custom.id, custom.defaultModel, System.currentTimeMillis())
     }
 
     override suspend fun getApiKey(config: ProviderConfig): String? =

@@ -23,6 +23,7 @@ import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.tools.AgentToolDefinitions
+import com.flowchat.app.domain.validation.ProviderConfigValidator
 import com.flowchat.app.domain.websearch.WebSearchContextFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -61,11 +62,13 @@ class ChatViewModel @Inject constructor(
     private val webSearchEnabled = MutableStateFlow(false)
     private val isStreaming = MutableStateFlow(false)
     private val errorMessage = MutableStateFlow<String?>(null)
-    private val toolCallStatus = MutableStateFlow<ToolCallStatusUi?>(null)
+    private val usageAccessPermissionRequest = MutableStateFlow<UsageAccessPermissionRequestUi?>(null)
     private var sendJob: Job? = null
     private var activeAssistantMessageId: String? = null
     private var activeAssistantContent = ""
     private var activeAssistantReasoningContent = ""
+    private var activeAssistantReasoningStartedAt: Long? = null
+    private var activeAssistantReasoningDurationMillis = 0L
     private var pendingClearedInputEcho: String? = null
     private val toolJson = Json { ignoreUnknownKeys = true }
 
@@ -100,17 +103,17 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    private val stateWithToolStatus = combine(
+    private val stateWithPermissionRequest = combine(
         stateWithoutMessages,
-        toolCallStatus
-    ) { state: ChatUiState, toolStatus: ToolCallStatusUi? ->
+        usageAccessPermissionRequest
+    ) { state: ChatUiState, permissionRequest: UsageAccessPermissionRequestUi? ->
         state.copy(
-            toolCallStatus = toolStatus
+            usageAccessPermissionRequest = permissionRequest
         )
     }
 
     val uiState = combine(
-        stateWithToolStatus,
+        stateWithPermissionRequest,
         currentConversationId.flatMapLatest { id ->
             if (id == null) flowOf(emptyList()) else chatRepository.observeMessages(id)
         }
@@ -146,6 +149,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    fun dismissUsageAccessPermissionRequest() {
+        usageAccessPermissionRequest.value = null
+    }
+
     fun selectConversation(id: String) {
         currentConversationId.value = id
     }
@@ -161,7 +168,11 @@ class ChatViewModel @Inject constructor(
 
     fun newConversation() {
         viewModelScope.launch {
-            val provider = providerRepository.getProvidersOnce().firstOrNull()
+            val providers = providerRepository.getProvidersOnce()
+            val provider = providers.firstOrNull { provider ->
+                ProviderConfigValidator.validate(provider).isEmpty() &&
+                    providerRepository.getApiKey(provider) != null
+            } ?: providers.firstOrNull { provider -> ProviderConfigValidator.validate(provider).isEmpty() }
             if (provider == null) {
                 errorMessage.value = "Create a provider first."
                 return@launch
@@ -211,7 +222,6 @@ class ChatViewModel @Inject constructor(
         pendingClearedInputEcho = rawText
         input.value = ""
         errorMessage.value = null
-        toolCallStatus.value = null
         sendJob = viewModelScope.launch {
             isStreaming.value = true
             val provider = providerRepository.getProvider(conversation.providerId)
@@ -227,7 +237,7 @@ class ChatViewModel @Inject constructor(
                 MessageStatus.Sent,
                 conversation.modelName
             )
-            val assistant = chatRepository.appendMessage(
+            var assistant = chatRepository.appendMessage(
                 conversation.id,
                 MessageRole.Assistant,
                 "",
@@ -237,6 +247,8 @@ class ChatViewModel @Inject constructor(
             activeAssistantMessageId = assistant.id
             activeAssistantContent = ""
             activeAssistantReasoningContent = ""
+            activeAssistantReasoningStartedAt = null
+            activeAssistantReasoningDurationMillis = 0L
             val freshConversation = chatRepository.getConversation(conversation.id) ?: conversation
             val history = chatRepository.getMessages(conversation.id)
                 .filter { it.id != assistant.id }
@@ -320,13 +332,37 @@ class ChatViewModel @Inject constructor(
                         errorMessage.value = message
                         return@runCatching
                     }
-                    val toolResultMessages = executeToolCalls(response.toolCalls, tavilyApiKey.orEmpty())
+                    ensureVisibleAssistantSegmentBeforeToolCall(
+                        assistantId = assistant.id,
+                        content = content,
+                        reasoningContent = reasoningContent
+                    )
+                    val toolResultMessages = executeToolCalls(
+                        calls = response.toolCalls,
+                        conversationId = conversation.id,
+                        modelName = conversation.modelName,
+                        tavilyApiKey = tavilyApiKey.orEmpty()
+                    )
                     request = request.copy(
                         messages = request.messages +
                             ChatRequestMessage(role = MessageRole.Assistant.apiRole, toolCalls = response.toolCalls) +
                             toolResultMessages
                     )
                     toolRounds += 1
+                    assistant = chatRepository.appendMessage(
+                        conversation.id,
+                        MessageRole.Assistant,
+                        "",
+                        MessageStatus.Streaming,
+                        conversation.modelName
+                    )
+                    activeAssistantMessageId = assistant.id
+                    activeAssistantContent = ""
+                    activeAssistantReasoningContent = ""
+                    activeAssistantReasoningStartedAt = null
+                    activeAssistantReasoningDurationMillis = 0L
+                    content = ""
+                    reasoningContent = ""
                 }
             }.onFailure { throwable ->
                 if (throwable is CancellationException) {
@@ -342,6 +378,8 @@ class ChatViewModel @Inject constructor(
                 activeAssistantMessageId = null
                 activeAssistantContent = ""
                 activeAssistantReasoningContent = ""
+                activeAssistantReasoningStartedAt = null
+                activeAssistantReasoningDurationMillis = 0L
             }
             isStreaming.value = false
         }
@@ -415,10 +453,12 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun executeToolCalls(
         calls: List<ChatToolCall>,
+        conversationId: String,
+        modelName: String?,
         tavilyApiKey: String
     ): List<ChatRequestMessage> =
         calls.map { call ->
-            val result = executeSingleToolCall(call, tavilyApiKey)
+            val result = executeSingleToolCall(call, conversationId, modelName, tavilyApiKey)
             ChatRequestMessage(
                 role = "tool",
                 content = result,
@@ -426,62 +466,116 @@ class ChatViewModel @Inject constructor(
             )
         }
 
-    private suspend fun executeSingleToolCall(call: ChatToolCall, tavilyApiKey: String): String {
+    private suspend fun executeSingleToolCall(
+        call: ChatToolCall,
+        conversationId: String,
+        modelName: String?,
+        tavilyApiKey: String
+    ): String {
         val toolName = call.displayName()
-        toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Running)
+        val toolMessage = chatRepository.appendMessage(
+            conversationId,
+            MessageRole.Tool,
+            toolName,
+            MessageStatus.Streaming,
+            modelName
+        )
         return runCatching {
             when (call.name) {
                 AgentToolDefinitions.WebSearchToolName -> executeWebSearchTool(call.arguments, tavilyApiKey)
                 AgentToolDefinitions.AppUsageSummaryToolName -> executeAppUsageSummaryTool(call.arguments)
                 AgentToolDefinitions.RecentAppActivityToolName -> executeRecentAppActivityTool(call.arguments)
-                else -> "Unsupported tool: ${call.name}"
+                else -> ToolExecutionOutcome(
+                    content = "Unsupported tool: ${call.name}",
+                    errorDetail = "Unsupported tool: ${call.name}"
+                )
             }
         }.fold(
-            onSuccess = { result ->
-                if (toolCallStatus.value?.phase == ToolCallPhase.Running) {
-                    toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Complete)
+            onSuccess = { outcome ->
+                val detail = outcome.errorDetail
+                if (detail == null) {
+                    chatRepository.updateMessage(
+                        toolMessage.id,
+                        toolName,
+                        MessageStatus.Complete
+                    )
+                } else {
+                    chatRepository.updateMessage(
+                        toolMessage.id,
+                        failedToolMessageContent(toolName, detail),
+                        MessageStatus.Failed
+                    )
                 }
-                result
+                outcome.content
             },
             onFailure = { throwable ->
                 val message = throwable.message?.takeIf { it.isNotBlank() } ?: "Tool call failed."
-                toolCallStatus.value = ToolCallStatusUi(toolName, ToolCallPhase.Failed, message)
+                chatRepository.updateMessage(
+                    toolMessage.id,
+                    failedToolMessageContent(toolName, message),
+                    MessageStatus.Failed
+                )
                 "Tool call failed: $message"
             }
         )
     }
 
-    private suspend fun executeWebSearchTool(arguments: String, tavilyApiKey: String): String {
+    private suspend fun ensureVisibleAssistantSegmentBeforeToolCall(
+        assistantId: String,
+        content: String,
+        reasoningContent: String
+    ) {
+        val visibleContent = content.ifBlank { ToolCallPrefaceFallback }
+        chatRepository.updateMessage(
+            assistantId,
+            visibleContent,
+            MessageStatus.Complete,
+            reasoningContent
+        )
+    }
+
+    private suspend fun executeWebSearchTool(arguments: String, tavilyApiKey: String): ToolExecutionOutcome {
         val query = parseWebSearchQuery(arguments)
-            ?: return "Invalid web_search arguments: missing query."
+            ?: return ToolExecutionOutcome(
+                content = "Invalid web_search arguments: missing query.",
+                errorDetail = "Invalid web_search arguments: missing query."
+            )
         val searchResult = withTimeout(WebSearchTimeoutMillis) {
             webSearchClient.search(query, tavilyApiKey)
         }
-        return if (searchResult.results.isEmpty()) {
+        val content = if (searchResult.results.isEmpty()) {
             "No web search results found."
         } else {
             WebSearchContextFormatter.format(searchResult)
         }
+        return ToolExecutionOutcome(content)
     }
 
-    private suspend fun executeAppUsageSummaryTool(arguments: String): String {
+    private suspend fun executeAppUsageSummaryTool(arguments: String): ToolExecutionOutcome {
         if (!appUsageReader.hasUsageAccess()) {
-            toolCallStatus.value = ToolCallStatusUi("应用使用情况", ToolCallPhase.Failed, "未开启使用情况权限")
-            return "App usage access is not enabled. Ask the user to enable Usage Access in FlowChat settings."
+            return requestUsageAccessPermission("App usage")
         }
         val range = parseAppUsageRange(arguments)
         val summary = appUsageReader.getUsageSummary(range)
-        return AppUsageToolFormatter.formatSummary(summary)
+        return ToolExecutionOutcome(AppUsageToolFormatter.formatSummary(summary))
     }
 
-    private suspend fun executeRecentAppActivityTool(arguments: String): String {
+    private suspend fun executeRecentAppActivityTool(arguments: String): ToolExecutionOutcome {
         if (!appUsageReader.hasUsageAccess()) {
-            toolCallStatus.value = ToolCallStatusUi("最近应用活动", ToolCallPhase.Failed, "未开启使用情况权限")
-            return "App usage access is not enabled. Ask the user to enable Usage Access in FlowChat settings."
+            return requestUsageAccessPermission("Recent app activity")
         }
         val hours = parseRecentActivityHours(arguments)
         val activity = appUsageReader.getRecentActivity(hours)
-        return AppUsageToolFormatter.formatRecentActivity(activity)
+        return ToolExecutionOutcome(AppUsageToolFormatter.formatRecentActivity(activity))
+    }
+
+    private fun requestUsageAccessPermission(toolName: String): ToolExecutionOutcome {
+        val message = "Open Android system Usage Access settings and allow FlowChat before retrying this tool."
+        usageAccessPermissionRequest.value = UsageAccessPermissionRequestUi(toolName)
+        return ToolExecutionOutcome(
+            content = "App usage access is not enabled. $message",
+            errorDetail = message
+        )
     }
 
     private fun parseWebSearchQuery(arguments: String): String? =
@@ -521,6 +615,9 @@ class ChatViewModel @Inject constructor(
             else -> name
         }
 
+    private fun failedToolMessageContent(toolName: String, detail: String): String =
+        "$toolName\n$detail"
+
     private suspend fun appendReasoningDelta(
         assistantId: String,
         currentContent: String,
@@ -528,14 +625,19 @@ class ChatViewModel @Inject constructor(
         deltaText: String
     ): String {
         var reasoning = currentReasoning
+        val startedAt = activeAssistantReasoningStartedAt ?: System.currentTimeMillis().also { timestamp ->
+            activeAssistantReasoningStartedAt = timestamp
+        }
         val chunks = deltaText.displayChunks()
         chunks.forEachIndexed { index, chunk ->
             reasoning += chunk
+            activeAssistantReasoningDurationMillis = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L)
             chatRepository.updateMessage(
                 assistantId,
                 currentContent,
                 MessageStatus.Streaming,
-                reasoning
+                reasoning,
+                reasoningDurationMillis = activeAssistantReasoningDurationMillis
             )
             activeAssistantReasoningContent = reasoning
             if (index < chunks.lastIndex) {
@@ -559,7 +661,8 @@ class ChatViewModel @Inject constructor(
                 assistantId,
                 content,
                 MessageStatus.Streaming,
-                currentReasoning
+                currentReasoning,
+                reasoningDurationMillis = null
             )
             activeAssistantContent = content
             activeAssistantReasoningContent = currentReasoning
@@ -610,13 +713,16 @@ class ChatViewModel @Inject constructor(
                     assistantId,
                     stoppedContent,
                     MessageStatus.Stopped,
-                    stoppedReasoningContent
+                    stoppedReasoningContent,
+                    reasoningDurationMillis = activeAssistantReasoningDurationMillis.takeIf { it > 0L }
                 )
             }
         }
         activeAssistantMessageId = null
         activeAssistantContent = ""
         activeAssistantReasoningContent = ""
+        activeAssistantReasoningStartedAt = null
+        activeAssistantReasoningDurationMillis = 0L
     }
 
     fun retryLastFailed() {
@@ -632,6 +738,7 @@ class ChatViewModel @Inject constructor(
         const val IncrementalDisplayDelayMillis = 18L
         const val BatchedReasoningToContentPauseMillis = 450L
         const val MaxToolCallRounds = 2
+        const val ToolCallPrefaceFallback = "好，我先调用相关工具看看。"
     }
 }
 
@@ -640,4 +747,9 @@ private data class AssistantResponseResult(
     val reasoningContent: String,
     val toolCalls: List<ChatToolCall>,
     val errorMessage: String?
+)
+
+private data class ToolExecutionOutcome(
+    val content: String,
+    val errorDetail: String? = null
 )

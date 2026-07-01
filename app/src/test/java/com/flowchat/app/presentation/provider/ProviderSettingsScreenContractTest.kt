@@ -14,11 +14,10 @@ class ProviderSettingsScreenContractTest {
         assertFalse(source.contains("items("))
         assertFalse(source.contains("ListItem"))
         assertFalse(source.contains("stringResource(R.string.edit)"))
-        assertFalse(source.contains("modifier = Modifier.weight"))
     }
 
     @Test
-    fun providerScreenShowsPresetTemplatesAboveCustomConfiguration() {
+    fun providerScreenShowsPresetTemplatesAboveApiConfiguration() {
         val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
         val stateSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsUiState.kt").readText()
         val viewModelSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsViewModel.kt").readText()
@@ -27,17 +26,57 @@ class ProviderSettingsScreenContractTest {
 
         assertTrue(stateSource.contains("providerPresets: List<ProviderPreset> = ProviderTemplates.popularPresets()"))
         assertTrue(viewModelSource.contains("fun applyPreset(preset: ProviderPreset)"))
+        assertTrue(viewModelSource.contains("fun updatePresetApiKey(value: String)"))
+        assertTrue(viewModelSource.contains("fun savePresetApiKey()"))
+        assertTrue(viewModelSource.contains("fun dismissPresetApiKeyDialog()"))
         assertTrue(screenSource.contains("onApplyPreset = viewModel::applyPreset"))
+        assertTrue(screenSource.contains("onPresetApiKey = viewModel::updatePresetApiKey"))
+        assertTrue(screenSource.contains("onSavePresetApiKey = viewModel::savePresetApiKey"))
+        assertTrue(screenSource.contains("onDismissPresetApiKeyDialog = viewModel::dismissPresetApiKeyDialog"))
         assertTrue(screenSource.contains("ProviderPresetSection("))
-        assertTrue(screenSource.contains("R.string.provider_presets"))
-        assertTrue(screenSource.contains("R.string.custom_configuration"))
-        assertTrue(screenSource.indexOf("ProviderPresetSection(") < screenSource.indexOf("R.string.custom_configuration"))
+        assertFalse(screenSource.contains("stringResource(R.string.provider_presets)"))
+        assertTrue(screenSource.contains("R.string.custom_api_configuration"))
+        assertTrue(screenSource.indexOf("ProviderPresetSection(") < screenSource.indexOf("R.string.custom_api_configuration"))
         assertTrue(screenSource.contains("state.providerPresets.forEach"))
         assertTrue(screenSource.contains("onApplyPreset(preset)"))
-        assertTrue(strings.contains("<string name=\"provider_presets\">Presets</string>"))
-        assertTrue(strings.contains("<string name=\"custom_configuration\">Custom configuration</string>"))
-        assertTrue(zhStrings.contains("name=\"provider_presets\""))
-        assertTrue(zhStrings.contains("name=\"custom_configuration\""))
+        assertTrue(screenSource.contains("PresetApiKeyDialog("))
+        assertTrue(strings.contains("<string name=\"custom_api_configuration\">Custom API configuration</string>"))
+        assertTrue(strings.contains("<string name=\"preset_api_key_placeholder\">Enter API Key</string>"))
+        assertTrue(zhStrings.contains("name=\"custom_api_configuration\""))
+        assertTrue(zhStrings.contains("<string name=\"preset_api_key_placeholder\">请输入API Key</string>"))
+    }
+
+    @Test
+    fun presetClickUsesIndependentApiKeyDialogInsteadOfMutatingCustomForm() {
+        val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
+        val stateSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsUiState.kt").readText()
+        val viewModelSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsViewModel.kt").readText()
+        val presetStart = screenSource.indexOf("private fun ProviderPresetSection(")
+        val presetEnd = screenSource.indexOf("private fun ProviderLogo(", presetStart)
+        val presetBlock = screenSource.substring(presetStart, presetEnd)
+        val dialogStart = screenSource.indexOf("private fun PresetApiKeyDialog(")
+        val dialogEnd = screenSource.indexOf("private fun CurrentProviderCard(", dialogStart)
+        val dialogBlock = screenSource.substring(dialogStart, dialogEnd)
+        val applyPresetStart = viewModelSource.indexOf("fun applyPreset(preset: ProviderPreset)")
+        val applyPresetEnd = viewModelSource.indexOf("fun dismissPresetApiKeyDialog()", applyPresetStart)
+        val applyPresetBlock = viewModelSource.substring(applyPresetStart, applyPresetEnd)
+
+        assertTrue(stateSource.contains("val pendingPreset: ProviderPreset? = null"))
+        assertTrue(stateSource.contains("val presetApiKey: String = \"\""))
+        assertTrue(viewModelSource.contains("pendingPreset.value = preset"))
+        assertFalse(applyPresetBlock.contains("selected.update"))
+        assertTrue(viewModelSource.contains("preset.toProviderConfig()"))
+        assertTrue(viewModelSource.contains("providerRepository.upsertProvider(provider, presetApiKey.value.trim())"))
+        assertTrue(presetBlock.contains("onClick = { onApplyPreset(preset) }"))
+        assertFalse(presetBlock.contains("Text(stringResource(R.string.provider_presets)"))
+        assertTrue(dialogBlock.contains("AlertDialog("))
+        assertTrue(dialogBlock.contains("value = apiKey"))
+        assertFalse(dialogBlock.contains("title ="))
+        assertFalse(dialogBlock.contains("R.string.preset_api_key_title"))
+        assertTrue(dialogBlock.contains("label = { Text(stringResource(R.string.preset_api_key_placeholder)) }"))
+        assertFalse(dialogBlock.contains("R.string.provider_name"))
+        assertFalse(dialogBlock.contains("R.string.base_url"))
+        assertFalse(dialogBlock.contains("R.string.model"))
     }
 
     @Test
@@ -145,5 +184,78 @@ class ProviderSettingsScreenContractTest {
         assertTrue(zhStrings.contains("name=\"load_models\""))
         assertTrue(zhStrings.contains("name=\"model_list\""))
         assertTrue(zhStrings.contains("name=\"no_models_found\""))
+    }
+
+    @Test
+    fun providerScreenMatchesOptionTwoPresetCurrentAndApiConfigurationCards() {
+        val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
+        val editorStart = screenSource.indexOf("private fun ProviderEditor(")
+        val editorEnd = screenSource.indexOf("private fun ProviderPresetSection(", editorStart)
+        val editorBlock = screenSource.substring(editorStart, editorEnd)
+        val presetStart = screenSource.indexOf("private fun ProviderPresetSection(")
+        val fieldColorsStart = screenSource.indexOf("private fun ProviderLogo", presetStart)
+        val presetBlock = screenSource.substring(presetStart, fieldColorsStart)
+        val strings = File("src/main/res/values/strings.xml").readText()
+        val zhStrings = File("src/main/res/values-zh-rCN/strings.xml").readText()
+
+        assertFalse(screenSource.contains("import androidx.compose.foundation.Canvas"))
+        assertTrue(screenSource.contains("import androidx.compose.material3.ButtonDefaults"))
+        assertTrue(screenSource.contains("ButtonDefaults.outlinedButtonColors("))
+        assertTrue(screenSource.contains("private fun ProviderSection("))
+        assertTrue(screenSource.contains("private fun CurrentProviderCard("))
+        assertTrue(screenSource.contains("private fun ProviderLogo("))
+        assertTrue(screenSource.contains("private fun providerLogoRes("))
+        assertFalse(editorBlock.contains("Card(\n        modifier = modifier.fillMaxSize()"))
+        assertTrue(editorBlock.contains("CurrentProviderCard("))
+        assertTrue(editorBlock.contains("ProviderSection(title = stringResource(R.string.custom_api_configuration))"))
+        assertTrue(editorBlock.contains("ButtonDefaults.buttonColors("))
+        assertTrue(editorBlock.contains("containerColor = MaterialTheme.colorScheme.primary"))
+        assertTrue(editorBlock.contains("shape = RoundedCornerShape(12.dp)"))
+        assertTrue(presetBlock.contains("ButtonDefaults.outlinedButtonColors("))
+        assertTrue(presetBlock.contains("ProviderLogo(providerName = preset.displayName"))
+        assertTrue(presetBlock.contains("containerColor = MaterialTheme.colorScheme.surface"))
+        assertTrue(presetBlock.contains("BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)"))
+        assertTrue(screenSource.contains("shape = RoundedCornerShape(18.dp)"))
+        assertTrue(screenSource.contains("focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant"))
+        assertTrue(screenSource.contains("focusedBorderColor = MaterialTheme.colorScheme.primary"))
+        assertTrue(strings.contains("<string name=\"current_configuration\">Current configuration</string>"))
+        assertTrue(strings.contains("<string name=\"custom_api_configuration\">Custom API configuration</string>"))
+        assertTrue(strings.contains("<string name=\"optional_settings\">Optional settings</string>"))
+        assertTrue(strings.contains("<string name=\"delete_this_configuration\">Delete this configuration</string>"))
+        assertTrue(zhStrings.contains("name=\"current_configuration\""))
+        assertTrue(zhStrings.contains("name=\"custom_api_configuration\""))
+        assertTrue(zhStrings.contains("name=\"optional_settings\""))
+        assertTrue(zhStrings.contains("name=\"delete_this_configuration\""))
+    }
+
+    @Test
+    fun providerPresetsUseOriginalLogoResourcesInsteadOfHandDrawnGlyphs() {
+        val screenSource = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
+
+        assertFalse(screenSource.contains("private fun ProviderGlyph("))
+        assertFalse(screenSource.contains("Canvas("))
+        assertTrue(screenSource.contains("Image("))
+        assertTrue(screenSource.contains("painterResource(providerLogoRes(providerName))"))
+        assertTrue(screenSource.contains("R.drawable.provider_openai"))
+        assertTrue(screenSource.contains("R.drawable.provider_claude"))
+        assertTrue(screenSource.contains("R.drawable.provider_deepseek"))
+        assertTrue(screenSource.contains("R.drawable.provider_gemini"))
+        assertTrue(File("src/main/res/drawable-nodpi/provider_openai.png").exists())
+        assertTrue(File("src/main/res/drawable-nodpi/provider_claude.png").exists())
+        assertTrue(File("src/main/res/drawable-nodpi/provider_deepseek.png").exists())
+        assertTrue(File("src/main/res/drawable-nodpi/provider_gemini.png").exists())
+    }
+
+    @Test
+    fun providerRepositoryKeepsPresetProvidersSeparateFromBlankCustomConfiguration() {
+        val repositorySource = File("src/main/java/com/flowchat/app/data/repository/RoomProviderRepository.kt").readText()
+        val templateSource = File("src/main/java/com/flowchat/app/domain/provider/ProviderTemplates.kt").readText()
+
+        assertFalse(repositorySource.contains("providerDao.deleteAllExcept(custom.id)"))
+        assertFalse(repositorySource.contains("baseUrl = seed.baseUrl.ifBlank"))
+        assertFalse(repositorySource.contains("defaultModel = seed.defaultModel.ifBlank"))
+        assertTrue(repositorySource.contains("providerDao.upsert(custom.toEntity())"))
+        assertTrue(templateSource.contains("baseUrl = \"\""))
+        assertTrue(templateSource.contains("defaultModel = \"\""))
     }
 }

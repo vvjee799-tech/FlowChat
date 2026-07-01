@@ -99,12 +99,14 @@ class RoomChatRepository @Inject constructor(
         id: String,
         content: String,
         status: MessageStatus,
-        reasoningContent: String
+        reasoningContent: String,
+        reasoningDurationMillis: Long?
     ) {
         messageDao.updateContentReasoningAndStatus(
             id,
             content,
             reasoningContent,
+            reasoningDurationMillis,
             status.name,
             System.currentTimeMillis()
         )

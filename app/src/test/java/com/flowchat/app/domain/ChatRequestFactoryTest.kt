@@ -51,6 +51,35 @@ class ChatRequestFactoryTest {
     }
 
     @Test
+    fun excludesLocalToolTimelineMessagesFromApiConversationHistory() {
+        val request = ChatRequestFactory.create(
+            conversation = Conversation(
+                id = "c1",
+                providerId = "p1",
+                modelName = "deepseek-chat"
+            ),
+            messages = listOf(
+                Message(conversationId = "c1", role = MessageRole.User, content = "今天我玩了什么软件？"),
+                Message(conversationId = "c1", role = MessageRole.Assistant, content = "我来看看。"),
+                Message(
+                    conversationId = "c1",
+                    role = MessageRole.Tool,
+                    content = "应用使用情况",
+                    status = MessageStatus.Complete
+                ),
+                Message(conversationId = "c1", role = MessageRole.Assistant, content = "你今天主要用了抖音。")
+            )
+        )
+
+        assertEquals(
+            listOf("user", "assistant", "assistant"),
+            request.messages.map { it.role }
+        )
+        assertTrue(request.messages.none { it.role == "tool" })
+        assertTrue(request.messages.none { it.content == "应用使用情况" })
+    }
+
+    @Test
     fun wrapsSystemPromptAsConversationLevelInstructions() {
         val request = ChatRequestFactory.create(
             conversation = Conversation(

@@ -11,8 +11,8 @@ class ProviderTemplatesTest {
 
         assertEquals("provider-custom", provider.id)
         assertEquals("Custom configuration", provider.displayName)
-        assertEquals("https://api.openai.com/v1", provider.baseUrl)
-        assertEquals("gpt-5.4-mini", provider.defaultModel)
+        assertEquals("", provider.baseUrl)
+        assertEquals("", provider.defaultModel)
     }
 
     @Test

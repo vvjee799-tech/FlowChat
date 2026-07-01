@@ -3,6 +3,7 @@ package com.flowchat.app.ui.theme
 import android.content.Context
 
 enum class AppAppearance(val storageValue: String) {
+    System("system"),
     Light("light"),
     Dark("dark");
 
@@ -10,8 +11,8 @@ enum class AppAppearance(val storageValue: String) {
         fun load(context: Context): AppAppearance {
             val value = context.applicationContext
                 .getSharedPreferences(AppAppearancePrefsName, Context.MODE_PRIVATE)
-                .getString(AppAppearanceKey, Light.storageValue)
-            return entries.firstOrNull { it.storageValue == value } ?: Light
+                .getString(AppAppearanceKey, Dark.storageValue)
+            return entries.firstOrNull { it.storageValue == value } ?: Dark
         }
 
         fun save(context: Context, appearance: AppAppearance) {

@@ -6,8 +6,8 @@ object ProviderTemplates {
     fun defaultCustomProvider(): ProviderConfig = ProviderConfig(
         id = CUSTOM_PROVIDER_ID,
         displayName = "Custom configuration",
-        baseUrl = "https://api.openai.com/v1",
-        defaultModel = "gpt-5.4-mini"
+        baseUrl = "",
+        defaultModel = ""
     )
 
     fun popularPresets(): List<ProviderPreset> = listOf(

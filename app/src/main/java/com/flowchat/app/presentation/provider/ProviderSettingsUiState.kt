@@ -9,8 +9,10 @@ const val SavedApiKeyDisplayValue = "••••••••••••••�
 data class ProviderSettingsUiState(
     val providers: List<ProviderConfig> = emptyList(),
     val providerPresets: List<ProviderPreset> = ProviderTemplates.popularPresets(),
+    val pendingPreset: ProviderPreset? = null,
     val selected: ProviderConfig? = null,
     val apiKey: String = "",
+    val presetApiKey: String = "",
     val hasApiKey: Boolean = false,
     val tavilyApiKey: String = "",
     val hasTavilyApiKey: Boolean = false,

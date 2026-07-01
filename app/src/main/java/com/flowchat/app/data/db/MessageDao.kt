@@ -22,12 +22,14 @@ interface MessageDao {
 
     @Query(
         "UPDATE messages SET content = :content, reasoningContent = :reasoningContent, " +
+            "reasoningDurationMillis = COALESCE(:reasoningDurationMillis, reasoningDurationMillis), " +
             "status = :status, updatedAt = :updatedAt WHERE id = :id"
     )
     suspend fun updateContentReasoningAndStatus(
         id: String,
         content: String,
         reasoningContent: String,
+        reasoningDurationMillis: Long?,
         status: String,
         updatedAt: Long
     )
