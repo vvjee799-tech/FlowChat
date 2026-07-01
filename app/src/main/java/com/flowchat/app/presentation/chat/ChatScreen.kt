@@ -108,8 +108,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -1157,19 +1158,14 @@ private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAv
     } else {
         RoundedCornerShape(topStart = 8.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = 22.dp)
     }
-    val bubbleMaxWidth = if (showAvatars) 286.dp else 320.dp
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top
-    ) {
-        if (showAvatars && !isUser) {
-            AssistantAvatar(
-                avatarPath = assistantAvatarPath,
-                size = 38.dp
-            )
-            Spacer(Modifier.size(8.dp))
-        }
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val assistantMaxWidth = maxOf(220.dp, screenWidth - 18.dp)
+    val bubbleMaxWidth = if (isUser) {
+        if (showAvatars) 286.dp else 320.dp
+    } else {
+        assistantMaxWidth
+    }
+    val messageContent: @Composable () -> Unit = {
         Box(modifier = Modifier.widthIn(max = bubbleMaxWidth)) {
             Column(modifier = Modifier.widthIn(max = bubbleMaxWidth)) {
                 if (!isUser && message.reasoningContent.isNotBlank()) {
@@ -1237,12 +1233,36 @@ private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAv
                 )
             }
         }
-        if (showAvatars && isUser) {
-            Spacer(Modifier.size(8.dp))
-            ProfileAvatar(
-                avatarPath = userAvatarPath,
-                size = 38.dp
-            )
+    }
+
+    if (isUser) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.Top
+        ) {
+            messageContent()
+            if (showAvatars) {
+                Spacer(Modifier.size(8.dp))
+                ProfileAvatar(
+                    avatarPath = userAvatarPath,
+                    size = 38.dp
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start
+        ) {
+            if (showAvatars) {
+                AssistantAvatar(
+                    avatarPath = assistantAvatarPath,
+                    size = 38.dp
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            messageContent()
         }
     }
 

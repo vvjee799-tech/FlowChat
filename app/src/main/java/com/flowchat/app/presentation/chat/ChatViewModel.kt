@@ -77,8 +77,12 @@ class ChatViewModel @Inject constructor(
         providerRepository.observeProviders(),
         currentConversationId
     ) { conversations: List<Conversation>, providers: List<ProviderConfig>, selectedId: String? ->
-        val current = conversations.firstOrNull { it.id == selectedId } ?: conversations.firstOrNull()
-        if (current != null && selectedId != current.id) {
+        val current = if (selectedId == null) {
+            conversations.firstOrNull()
+        } else {
+            conversations.firstOrNull { it.id == selectedId }
+        }
+        if (selectedId == null && current != null) {
             currentConversationId.value = current.id
         }
         ChatUiState(
@@ -217,13 +221,20 @@ class ChatViewModel @Inject constructor(
     fun send() {
         val rawText = input.value
         val text = rawText.trim()
-        val conversation = uiState.value.currentConversation ?: return
+        val selectedConversationId = currentConversationId.value ?: uiState.value.currentConversation?.id ?: return
         if (text.isBlank() || isStreaming.value) return
         pendingClearedInputEcho = rawText
         input.value = ""
         errorMessage.value = null
         sendJob = viewModelScope.launch {
             isStreaming.value = true
+            val conversation = chatRepository.getConversation(selectedConversationId)
+                ?: uiState.value.currentConversation?.takeIf { it.id == selectedConversationId }
+            if (conversation == null) {
+                errorMessage.value = "Conversation not found."
+                isStreaming.value = false
+                return@launch
+            }
             val provider = providerRepository.getProvider(conversation.providerId)
             if (provider == null) {
                 errorMessage.value = "Provider not found."

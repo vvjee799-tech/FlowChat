@@ -1,1 +1,2 @@
 -keep class kotlinx.serialization.** { *; }
+-dontwarn org.slf4j.impl.StaticLoggerBinder

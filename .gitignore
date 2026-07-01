@@ -3,6 +3,7 @@
 /app/build/
 /.kotlin/
 /local.properties
+/keystore.properties
 /.idea/
 *.iml
 captures/

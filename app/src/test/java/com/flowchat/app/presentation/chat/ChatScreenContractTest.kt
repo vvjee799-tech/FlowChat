@@ -608,7 +608,8 @@ class ChatScreenContractTest {
         assertTrue(source.contains("MessageList(messages = state.messages, assistantAvatarPath = state.currentConversation?.assistantAvatarPath"))
         assertTrue(source.contains("private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAvatarPath: String?, showAvatars: Boolean)"))
         assertTrue(bubbleBlock.contains("AssistantAvatar("))
-        assertTrue(bubbleBlock.contains("if (isUser) Arrangement.End else Arrangement.Start"))
+        assertTrue(bubbleBlock.contains("if (isUser)"))
+        assertTrue(bubbleBlock.contains("Column("))
         assertTrue(source.contains("private fun Conversation.displayAssistantTitle()"))
     }
 
@@ -643,9 +644,10 @@ class ChatScreenContractTest {
         assertTrue(sheetBlock.contains("onSave(assistantName, assistantAvatarPath, showAvatars, prompt"))
         assertTrue(source.contains("MessageList(messages = state.messages, assistantAvatarPath = state.currentConversation?.assistantAvatarPath, userAvatarPath = userAvatarPath, showAvatars = state.currentConversation?.showAvatars == true"))
         assertTrue(source.contains("private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAvatarPath: String?, showAvatars: Boolean)"))
-        assertTrue(bubbleBlock.contains("if (showAvatars && !isUser)"))
-        assertTrue(bubbleBlock.contains("if (showAvatars && isUser)"))
+        assertTrue(bubbleBlock.contains("if (showAvatars)"))
+        assertTrue(bubbleBlock.contains("if (isUser)"))
         assertTrue(bubbleBlock.contains("ProfileAvatar("))
+        assertTrue(bubbleBlock.contains("AssistantAvatar("))
         assertTrue(strings.contains("<string name=\"show_avatars\">Show avatars</string>"))
         assertTrue(zhStrings.contains("name=\"show_avatars\""))
     }
@@ -1099,6 +1101,23 @@ class ChatScreenContractTest {
         assertTrue(fullResponseBranch.indexOf("appendReasoningDelta(") < fullResponseBranch.indexOf("delay(BatchedReasoningToContentPauseMillis)"))
         assertTrue(fullResponseBranch.indexOf("delay(BatchedReasoningToContentPauseMillis)") < fullResponseBranch.indexOf("appendContentDelta("))
         assertTrue(source.contains("if (content.isBlank() && reasoningContent.isNotBlank())"))
+    }
+
+    @Test
+    fun assistantReplyContentExpandsNearScreenWidthInsteadOfFixedLegacyBubbleWidth() {
+        val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
+        val bubbleStart = source.indexOf("private fun MessageBubble(")
+        val bubbleEnd = source.indexOf("if (showTextSelection)", bubbleStart)
+        val bubbleBlock = source.substring(bubbleStart, bubbleEnd)
+
+        assertTrue(source.contains("import androidx.compose.ui.platform.LocalConfiguration"))
+        assertTrue(bubbleBlock.contains("val screenWidth = LocalConfiguration.current.screenWidthDp.dp"))
+        assertTrue(bubbleBlock.contains("val assistantMaxWidth = maxOf(220.dp, screenWidth - 18.dp)"))
+        assertTrue(bubbleBlock.contains("val bubbleMaxWidth = if (isUser)"))
+        assertTrue(bubbleBlock.contains("if (showAvatars) 286.dp else 320.dp"))
+        assertTrue(bubbleBlock.contains("assistantMaxWidth"))
+        assertTrue(bubbleBlock.contains("if (isUser)"))
+        assertTrue(bubbleBlock.contains("Column("))
     }
 }
 
