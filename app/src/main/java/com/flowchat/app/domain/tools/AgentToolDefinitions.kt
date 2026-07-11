@@ -11,6 +11,7 @@ object AgentToolDefinitions {
     const val WebSearchToolName = "web_search"
     const val AppUsageSummaryToolName = "get_app_usage_summary"
     const val RecentAppActivityToolName = "get_recent_app_activity"
+    const val OpenAppToolName = "open_app"
 
     fun webSearch(): ChatToolDefinition =
         ChatToolDefinition(
@@ -90,6 +91,29 @@ object AgentToolDefinitions {
             )
         )
 
+    fun openApp(): ChatToolDefinition =
+        ChatToolDefinition(
+            name = OpenAppToolName,
+            description = "Open an installed Android app only when the latest user message explicitly asks to open or launch it.",
+            parameters = JsonObject(
+                mapOf(
+                    "type" to JsonPrimitive("object"),
+                    "properties" to JsonObject(
+                        mapOf(
+                            "app_name" to JsonObject(
+                                mapOf(
+                                    "type" to JsonPrimitive("string"),
+                                    "description" to JsonPrimitive("The app label or Android package name to open.")
+                                )
+                            )
+                        )
+                    ),
+                    "required" to JsonArray(listOf(JsonPrimitive("app_name"))),
+                    "additionalProperties" to JsonPrimitive(false)
+                )
+            )
+        )
+
     fun withWebSearchTool(request: ChatRequest): ChatRequest =
         request.copy(
             tools = listOf(webSearch()),
@@ -102,6 +126,7 @@ object AgentToolDefinitions {
             if (includeWebSearch) add(webSearch())
             add(appUsageSummary())
             add(recentAppActivity())
+            add(openApp())
         }
         return request.copy(
             tools = tools,

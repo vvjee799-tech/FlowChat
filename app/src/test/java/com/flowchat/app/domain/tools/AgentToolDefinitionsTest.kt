@@ -4,6 +4,7 @@ import com.flowchat.app.domain.model.ChatRequest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,7 +27,8 @@ class AgentToolDefinitionsTest {
             listOf(
                 AgentToolDefinitions.WebSearchToolName,
                 AgentToolDefinitions.AppUsageSummaryToolName,
-                AgentToolDefinitions.RecentAppActivityToolName
+                AgentToolDefinitions.RecentAppActivityToolName,
+                "open_app"
             ),
             withLifeTools.tools.map { it.name }
         )
@@ -46,5 +48,27 @@ class AgentToolDefinitionsTest {
         assertTrue(recentPayload.contains(""""hours""""))
         assertTrue(recentPayload.contains(""""minimum":1"""))
         assertTrue(recentPayload.contains(""""maximum":24"""))
+    }
+
+    @Test
+    fun openAppToolRequiresAnAppNameAndExplicitUserIntent() {
+        val request = ChatRequest(
+            model = "gpt-test",
+            messages = emptyList(),
+            temperature = 1.0,
+            topP = 1.0,
+            maxTokens = null
+        )
+        val openApp = AgentToolDefinitions.withLifestyleTools(request, includeWebSearch = false)
+            .tools
+            .firstOrNull { it.name == "open_app" }
+
+        assertNotNull(openApp)
+        openApp ?: return
+        val payload = json.encodeToString(openApp.parameters)
+        assertTrue(openApp.description.contains("explicitly asks", ignoreCase = true))
+        assertTrue(payload.contains("\"app_name\""))
+        assertTrue(payload.contains("\"required\":[\"app_name\"]"))
+        assertTrue(payload.contains("\"additionalProperties\":false"))
     }
 }

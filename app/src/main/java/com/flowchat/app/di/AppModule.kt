@@ -3,6 +3,7 @@ package com.flowchat.app.di
 import android.content.Context
 import androidx.room.Room
 import com.flowchat.app.data.appusage.AndroidAppUsageReader
+import com.flowchat.app.data.applauncher.AndroidAppLauncher
 import com.flowchat.app.data.db.ConversationDao
 import com.flowchat.app.data.db.FlowChatDatabase
 import com.flowchat.app.data.db.MIGRATION_1_2
@@ -26,6 +27,7 @@ import com.flowchat.app.data.security.ApiKeyStore
 import com.flowchat.app.data.security.KeystoreApiKeyStore
 import com.flowchat.app.domain.repository.ChatRepository
 import com.flowchat.app.domain.repository.AppUsageReader
+import com.flowchat.app.domain.repository.AppLauncher
 import com.flowchat.app.domain.repository.MemoryRepository
 import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
@@ -85,6 +87,7 @@ object AppModule {
 abstract class BindingModule {
     @Binds abstract fun bindApiKeyStore(impl: KeystoreApiKeyStore): ApiKeyStore
     @Binds abstract fun bindAppUsageReader(impl: AndroidAppUsageReader): AppUsageReader
+    @Binds abstract fun bindAppLauncher(impl: AndroidAppLauncher): AppLauncher
     @Binds abstract fun bindChatRepository(impl: RoomChatRepository): ChatRepository
     @Binds abstract fun bindMemoryRepository(impl: FileMemoryRepository): MemoryRepository
     @Binds abstract fun bindPromptProfileRepository(impl: FilePromptProfileRepository): PromptProfileRepository

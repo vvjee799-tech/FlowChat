@@ -137,4 +137,28 @@ class OpenAiDtosTest {
         assertTrue(payload.contains(""""tool_call_id":"call_1""""))
         assertTrue(payload.contains(""""content":"search result""""))
     }
+
+    @Test
+    fun serializesAssistantContentAndReasoningForThinkingToolFollowUp() {
+        val assistantMessage = ChatRequestMessage(
+            role = "assistant",
+            content = "I will check.",
+            reasoningContent = "The user asked for current information.",
+            toolCalls = listOf(
+                AgentToolDefinitions.toolCall(
+                    id = "call_1",
+                    name = "web_search",
+                    arguments = """{"query":"FlowChat"}"""
+                )
+            )
+        )
+
+        val payload = json.encodeToString(
+            request.copy(messages = listOf(assistantMessage)).toOpenAiRequest(stream = true)
+        )
+
+        assertTrue(payload.contains(""""content":"I will check.""""))
+        assertTrue(payload.contains(""""reasoning_content":"The user asked for current information.""""))
+        assertTrue(payload.contains("\"tool_calls\":["))
+    }
 }

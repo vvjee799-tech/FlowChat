@@ -28,6 +28,7 @@ data class OpenAiChatCompletionRequest(
 data class OpenAiChatMessage(
     val role: String,
     val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiToolCall>? = null
 )
@@ -111,6 +112,7 @@ private fun ChatRequestMessage.toOpenAiMessage(): OpenAiChatMessage =
     OpenAiChatMessage(
         role = role,
         content = content,
+        reasoningContent = reasoningContent,
         toolCallId = toolCallId,
         toolCalls = toolCalls.map { call ->
             OpenAiToolCall(

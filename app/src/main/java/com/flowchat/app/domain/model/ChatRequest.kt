@@ -17,6 +17,7 @@ data class ChatRequest(
 data class ChatRequestMessage(
     val role: String,
     val content: String? = null,
+    val reasoningContent: String? = null,
     val toolCallId: String? = null,
     val toolCalls: List<ChatToolCall> = emptyList()
 )

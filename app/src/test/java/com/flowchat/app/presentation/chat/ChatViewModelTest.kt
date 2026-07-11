@@ -5,6 +5,7 @@ import com.flowchat.app.data.network.WebSearchClient
 import com.flowchat.app.domain.model.AppUsageSummary
 import com.flowchat.app.domain.model.ChatDelta
 import com.flowchat.app.domain.model.ChatRequest
+import com.flowchat.app.domain.model.ChatToolCall
 import com.flowchat.app.domain.model.Conversation
 import com.flowchat.app.domain.model.MemoryRecord
 import com.flowchat.app.domain.model.Message
@@ -16,11 +17,13 @@ import com.flowchat.app.domain.model.WebSearchResult
 import com.flowchat.app.domain.prompt.PromptProfileConfig
 import com.flowchat.app.domain.provider.ProviderTemplates
 import com.flowchat.app.domain.repository.AppUsageReader
+import com.flowchat.app.domain.repository.AppLauncher
 import com.flowchat.app.domain.repository.ChatRepository
 import com.flowchat.app.domain.repository.MemoryRepository
 import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
+import com.flowchat.app.domain.tools.AgentToolDefinitions
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,6 +88,7 @@ class ChatViewModelTest {
             webSearchClient = FakeWebSearchClient(),
             webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
             appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
             promptProfileRepository = FakePromptProfileRepository(),
             memoryRepository = FakeMemoryRepository()
         )
@@ -133,6 +137,7 @@ class ChatViewModelTest {
             webSearchClient = FakeWebSearchClient(),
             webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
             appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
             promptProfileRepository = FakePromptProfileRepository(),
             memoryRepository = FakeMemoryRepository()
         )
@@ -174,6 +179,7 @@ class ChatViewModelTest {
             webSearchClient = FakeWebSearchClient(),
             webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
             appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
             promptProfileRepository = FakePromptProfileRepository(),
             memoryRepository = FakeMemoryRepository()
         )
@@ -190,6 +196,132 @@ class ChatViewModelTest {
         assertTrue(chatRepository.messagesFor("conversation-1")
             .filter { it.role == MessageRole.User || it.role == MessageRole.Assistant }
             .all { it.modelName == "deepseek-v4-flash" })
+        collection.cancel()
+    }
+
+    @Test
+    fun toolFollowUpReplaysAssistantContentAndReasoning() = runTest(dispatcher) {
+        val provider = ProviderConfig(
+            id = "provider-1",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-pro"
+        )
+        val conversation = Conversation(
+            id = "conversation-1",
+            title = "Tool follow-up",
+            providerId = provider.id,
+            modelName = provider.defaultModel
+        )
+        val chatRepository = FakeChatRepository(
+            initialConversations = listOf(conversation),
+            nextConversation = conversation
+        )
+        val chatClient = FakeChatCompletionClient(
+            scriptedResponses = listOf(
+                listOf(
+                    ChatDelta.Reasoning("I need the user's usage summary."),
+                    ChatDelta.Content("I will check."),
+                    ChatDelta.ToolCalls(
+                        listOf(
+                            ChatToolCall(
+                                id = "call_1",
+                                name = AgentToolDefinitions.AppUsageSummaryToolName,
+                                arguments = """{"range":"today"}"""
+                            )
+                        )
+                    )
+                ),
+                listOf(ChatDelta.Content("Here is the result."), ChatDelta.Done)
+            )
+        )
+        val viewModel = ChatViewModel(
+            chatRepository = chatRepository,
+            providerRepository = FakeProviderRepository(provider),
+            chatClient = chatClient,
+            webSearchClient = FakeWebSearchClient(),
+            webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
+            appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
+            promptProfileRepository = FakePromptProfileRepository(),
+            memoryRepository = FakeMemoryRepository()
+        )
+        val collection = backgroundScope.launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.updateInput("What did I use today?")
+        viewModel.send()
+        advanceUntilIdle()
+
+        assertEquals(2, chatClient.requests.size)
+        val assistantToolMessage = chatClient.requests[1].messages
+            .last { it.role == MessageRole.Assistant.apiRole && it.toolCalls.isNotEmpty() }
+        assertEquals("I will check.", assistantToolMessage.content)
+        assertEquals("I need the user's usage summary.", assistantToolMessage.reasoningContent)
+        collection.cancel()
+    }
+
+    @Test
+    fun openAppToolLaunchesRequestedAppAndReturnsTheResultToTheModel() = runTest(dispatcher) {
+        val provider = ProviderConfig(
+            id = "provider-1",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-pro"
+        )
+        val conversation = Conversation(
+            id = "conversation-1",
+            title = "Open app",
+            providerId = provider.id,
+            modelName = provider.defaultModel
+        )
+        val chatRepository = FakeChatRepository(
+            initialConversations = listOf(conversation),
+            nextConversation = conversation
+        )
+        val chatClient = FakeChatCompletionClient(
+            scriptedResponses = listOf(
+                listOf(
+                    ChatDelta.Content("I will open it."),
+                    ChatDelta.ToolCalls(
+                        listOf(
+                            ChatToolCall(
+                                id = "call_open",
+                                name = AgentToolDefinitions.OpenAppToolName,
+                                arguments = """{"app_name":"Settings"}"""
+                            )
+                        )
+                    )
+                ),
+                listOf(ChatDelta.Content("Settings is open."), ChatDelta.Done)
+            )
+        )
+        val appLauncher = FakeAppLauncher()
+        val viewModel = ChatViewModel(
+            chatRepository = chatRepository,
+            providerRepository = FakeProviderRepository(provider),
+            chatClient = chatClient,
+            webSearchClient = FakeWebSearchClient(),
+            webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
+            appUsageReader = FakeAppUsageReader(),
+            appLauncher = appLauncher,
+            promptProfileRepository = FakePromptProfileRepository(),
+            memoryRepository = FakeMemoryRepository()
+        )
+        val collection = backgroundScope.launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.updateInput("Open Settings")
+        viewModel.send()
+        advanceUntilIdle()
+
+        assertEquals(listOf("Settings"), appLauncher.openedApps)
+        val toolResult = chatClient.requests[1].messages.last { it.role == "tool" }
+        assertEquals("Opened app: Settings.", toolResult.content)
+        assertTrue(
+            chatRepository.messagesFor(conversation.id)
+                .any { it.role == MessageRole.Tool && it.content == "打开应用：Settings" }
+        )
         collection.cancel()
     }
 
@@ -305,13 +437,18 @@ class ChatViewModelTest {
         override suspend fun getApiKey(config: ProviderConfig): String? = apiKeys[config.id]
     }
 
-    private class FakeChatCompletionClient : ChatCompletionClient {
+    private class FakeChatCompletionClient(
+        private val scriptedResponses: List<List<ChatDelta>> = emptyList()
+    ) : ChatCompletionClient {
         val requests = mutableListOf<ChatRequest>()
 
-        override fun streamChat(request: ChatRequest, provider: ProviderConfig, apiKey: String?): Flow<ChatDelta> =
-            flowOf(ChatDelta.Content("ok"), ChatDelta.Done).also {
-                requests += request
-            }
+        override fun streamChat(request: ChatRequest, provider: ProviderConfig, apiKey: String?): Flow<ChatDelta> {
+            val responseIndex = requests.size
+            requests += request
+            val response = scriptedResponses.getOrNull(responseIndex)
+                ?: listOf(ChatDelta.Content("ok"), ChatDelta.Done)
+            return flowOf(*response.toTypedArray())
+        }
     }
 
     private class FakeWebSearchClient : WebSearchClient {
@@ -337,6 +474,15 @@ class ChatViewModelTest {
             )
         override suspend fun getRecentActivity(hours: Int): RecentAppActivity =
             RecentAppActivity(hours = hours, events = emptyList())
+    }
+
+    private class FakeAppLauncher : AppLauncher {
+        val openedApps = mutableListOf<String>()
+
+        override suspend fun openApp(appName: String): String {
+            openedApps += appName
+            return appName
+        }
     }
 
     private class FakePromptProfileRepository : PromptProfileRepository {

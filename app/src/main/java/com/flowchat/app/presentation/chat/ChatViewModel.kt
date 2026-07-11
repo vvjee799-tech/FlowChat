@@ -16,6 +16,7 @@ import com.flowchat.app.domain.model.MessageRole
 import com.flowchat.app.domain.model.MessageStatus
 import com.flowchat.app.domain.model.ProviderConfig
 import com.flowchat.app.domain.repository.AppUsageReader
+import com.flowchat.app.domain.repository.AppLauncher
 import com.flowchat.app.domain.repository.ChatRepository
 import com.flowchat.app.domain.prompt.PromptProfileConfig
 import com.flowchat.app.domain.repository.MemoryRepository
@@ -54,6 +55,7 @@ class ChatViewModel @Inject constructor(
     private val webSearchClient: WebSearchClient,
     private val webSearchSettingsRepository: WebSearchSettingsRepository,
     private val appUsageReader: AppUsageReader,
+    private val appLauncher: AppLauncher,
     private val promptProfileRepository: PromptProfileRepository,
     private val memoryRepository: MemoryRepository
 ) : ViewModel() {
@@ -356,7 +358,12 @@ class ChatViewModel @Inject constructor(
                     )
                     request = request.copy(
                         messages = request.messages +
-                            ChatRequestMessage(role = MessageRole.Assistant.apiRole, toolCalls = response.toolCalls) +
+                            ChatRequestMessage(
+                                role = MessageRole.Assistant.apiRole,
+                                content = content,
+                                reasoningContent = reasoningContent,
+                                toolCalls = response.toolCalls
+                            ) +
                             toolResultMessages
                     )
                     toolRounds += 1
@@ -496,6 +503,7 @@ class ChatViewModel @Inject constructor(
                 AgentToolDefinitions.WebSearchToolName -> executeWebSearchTool(call.arguments, tavilyApiKey)
                 AgentToolDefinitions.AppUsageSummaryToolName -> executeAppUsageSummaryTool(call.arguments)
                 AgentToolDefinitions.RecentAppActivityToolName -> executeRecentAppActivityTool(call.arguments)
+                AgentToolDefinitions.OpenAppToolName -> executeOpenAppTool(call.arguments)
                 else -> ToolExecutionOutcome(
                     content = "Unsupported tool: ${call.name}",
                     errorDetail = "Unsupported tool: ${call.name}"
@@ -580,6 +588,16 @@ class ChatViewModel @Inject constructor(
         return ToolExecutionOutcome(AppUsageToolFormatter.formatRecentActivity(activity))
     }
 
+    private suspend fun executeOpenAppTool(arguments: String): ToolExecutionOutcome {
+        val appName = parseOpenAppName(arguments)
+            ?: return ToolExecutionOutcome(
+                content = "Invalid open_app arguments: missing app_name.",
+                errorDetail = "Invalid open_app arguments: missing app_name."
+            )
+        val openedApp = appLauncher.openApp(appName)
+        return ToolExecutionOutcome("Opened app: $openedApp.")
+    }
+
     private fun requestUsageAccessPermission(toolName: String): ToolExecutionOutcome {
         val message = "Open Android system Usage Access settings and allow FlowChat before retrying this tool."
         usageAccessPermissionRequest.value = UsageAccessPermissionRequestUi(toolName)
@@ -618,11 +636,23 @@ class ChatViewModel @Inject constructor(
                 ?.coerceIn(1, 24)
         }.getOrNull() ?: 6
 
+    private fun parseOpenAppName(arguments: String): String? =
+        runCatching {
+            toolJson.parseToJsonElement(arguments)
+                .jsonObject["app_name"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+
     private fun ChatToolCall.displayName(): String =
         when (name) {
             AgentToolDefinitions.WebSearchToolName -> "联网搜索"
             AgentToolDefinitions.AppUsageSummaryToolName -> "应用使用情况"
             AgentToolDefinitions.RecentAppActivityToolName -> "最近应用活动"
+            AgentToolDefinitions.OpenAppToolName ->
+                parseOpenAppName(arguments)?.let { "打开应用：$it" } ?: "打开应用"
             else -> name
         }
 
