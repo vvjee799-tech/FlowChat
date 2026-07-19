@@ -175,10 +175,10 @@ class ProviderSettingsViewModel @Inject constructor(
             }.onSuccess { models ->
                 modelOptions.value = models
                 modelOptionsCache[cacheKey] = models
-                modelListError.value = if (models.isEmpty()) "未找到可用模型" else null
+                modelListError.value = if (models.isEmpty()) "No models found." else null
             }.onFailure { throwable ->
                 modelOptions.value = emptyList()
-                modelListError.value = throwable.message ?: "模型列表获取失败"
+                modelListError.value = throwable.message ?: "Failed to load model list."
             }
             isLoadingModels.value = false
         }

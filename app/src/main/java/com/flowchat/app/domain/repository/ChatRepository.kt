@@ -24,12 +24,15 @@ interface ChatRepository {
         maxTokens: Int?
     )
     suspend fun updateConversationModel(id: String, providerId: String, modelName: String)
+    suspend fun updateConversationTitle(id: String, title: String)
     suspend fun appendMessage(
         conversationId: String,
         role: MessageRole,
         content: String,
         status: MessageStatus,
-        modelName: String?
+        modelName: String?,
+        attachmentName: String? = null,
+        attachmentText: String? = null
     ): Message
     suspend fun updateMessage(
         id: String,

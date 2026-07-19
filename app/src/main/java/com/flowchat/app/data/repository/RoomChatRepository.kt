@@ -73,18 +73,26 @@ class RoomChatRepository @Inject constructor(
         conversationDao.updateModel(id, providerId, modelName, System.currentTimeMillis())
     }
 
+    override suspend fun updateConversationTitle(id: String, title: String) {
+        conversationDao.updateTitle(id, title, System.currentTimeMillis())
+    }
+
     override suspend fun appendMessage(
         conversationId: String,
         role: MessageRole,
         content: String,
         status: MessageStatus,
-        modelName: String?
+        modelName: String?,
+        attachmentName: String?,
+        attachmentText: String?
     ): Message {
         val now = System.currentTimeMillis()
         val message = Message(
             conversationId = conversationId,
             role = role,
             content = content,
+            attachmentName = attachmentName,
+            attachmentText = attachmentText,
             status = status,
             modelName = modelName,
             createdAt = now,

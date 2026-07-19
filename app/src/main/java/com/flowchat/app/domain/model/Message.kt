@@ -15,6 +15,7 @@ enum class MessageStatus {
     Sent,
     Streaming,
     Stopped,
+    Cancelled,
     Complete,
     Failed
 }
@@ -24,6 +25,8 @@ data class Message(
     val conversationId: String,
     val role: MessageRole,
     val content: String,
+    val attachmentName: String? = null,
+    val attachmentText: String? = null,
     val reasoningContent: String = "",
     val reasoningDurationMillis: Long = 0L,
     val status: MessageStatus = MessageStatus.Complete,

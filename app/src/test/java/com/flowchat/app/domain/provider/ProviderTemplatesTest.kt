@@ -20,7 +20,7 @@ class ProviderTemplatesTest {
         val presets = ProviderTemplates.popularPresets()
 
         assertEquals(
-            listOf("preset-chatgpt", "preset-claude", "preset-deepseek", "preset-gemini"),
+            listOf("preset-chatgpt", "preset-deepseek", "preset-gemini"),
             presets.map { it.id }
         )
         assertTrue(presets.all { it.displayName.isNotBlank() })
@@ -29,12 +29,10 @@ class ProviderTemplatesTest {
         assertEquals("ChatGPT", presets[0].displayName)
         assertEquals("https://api.openai.com/v1", presets[0].baseUrl)
         assertEquals("gpt-5.4-mini", presets[0].defaultModel)
-        assertEquals("Claude", presets[1].displayName)
-        assertEquals("https://api.anthropic.com/v1", presets[1].baseUrl)
-        assertEquals("claude-sonnet-4-6", presets[1].defaultModel)
-        assertEquals("DeepSeek", presets[2].displayName)
-        assertEquals("https://api.deepseek.com", presets[2].baseUrl)
-        assertEquals("deepseek-v4-flash", presets[2].defaultModel)
+        assertEquals("DeepSeek", presets[1].displayName)
+        assertEquals("https://api.deepseek.com", presets[1].baseUrl)
+        assertEquals("deepseek-v4-flash", presets[1].defaultModel)
+        assertTrue(presets.none { it.baseUrl.contains("api.anthropic.com") })
         assertTrue(presets.all { it.iconResName == null })
     }
 }

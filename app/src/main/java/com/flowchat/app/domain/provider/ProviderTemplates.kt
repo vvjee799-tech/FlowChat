@@ -18,12 +18,6 @@ object ProviderTemplates {
             defaultModel = "gpt-5.4-mini"
         ),
         ProviderPreset(
-            id = "preset-claude",
-            displayName = "Claude",
-            baseUrl = "https://api.anthropic.com/v1",
-            defaultModel = "claude-sonnet-4-6"
-        ),
-        ProviderPreset(
             id = "preset-deepseek",
             displayName = "DeepSeek",
             baseUrl = "https://api.deepseek.com",

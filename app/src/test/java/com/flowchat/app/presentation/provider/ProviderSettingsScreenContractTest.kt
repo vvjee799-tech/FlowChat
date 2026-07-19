@@ -7,6 +7,27 @@ import org.junit.Test
 
 class ProviderSettingsScreenContractTest {
     @Test
+    fun providerScreenUsesCompactOperationalLayout() {
+        val source = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
+        val presetStart = source.indexOf("private fun ProviderPresetSection(")
+        val presetEnd = source.indexOf("private fun ProviderLogo(", presetStart)
+        val preset = source.substring(presetStart, presetEnd)
+
+        assertTrue(source.contains("TopAppBar("))
+        assertFalse(source.contains("CenterAlignedTopAppBar("))
+        assertTrue(preset.contains(".height(64.dp)"))
+        assertTrue(preset.contains("Row("))
+        assertTrue(preset.contains("ProviderLogo(providerName = preset.displayName, modifier = Modifier.size(24.dp))"))
+        assertTrue(source.contains("singleLine = true"))
+        assertTrue(source.contains("var customConfigurationExpanded by rememberSaveable"))
+        assertTrue(source.contains("var searchFallbackExpanded by rememberSaveable"))
+        assertTrue(source.contains("expanded = customConfigurationExpanded"))
+        assertTrue(source.contains("expanded = searchFallbackExpanded"))
+        assertTrue(source.contains("if (expanded)"))
+        assertTrue(source.contains("Modifier.rotate(if (expanded) 180f else 0f)"))
+    }
+
+    @Test
     fun providerScreenDoesNotRenderPresetProviderList() {
         val source = File("src/main/java/com/flowchat/app/presentation/provider/ProviderSettingsScreen.kt").readText()
 
@@ -142,8 +163,8 @@ class ProviderSettingsScreenContractTest {
         assertTrue(screenSource.contains("val displayedTavilyApiKey = if (tavilySavedMaskVisible) SavedApiKeyDisplayValue else state.tavilyApiKey"))
         assertTrue(screenSource.contains("onTavilyApiKey"))
         assertTrue(screenSource.contains("R.string.api_key_saved_hint"))
-        assertTrue(strings.contains("<string name=\"web_search_configuration\">Web search configuration</string>"))
-        assertTrue(strings.contains("<string name=\"tavily_api_key\">Tavily API key</string>"))
+        assertTrue(strings.contains("<string name=\"web_search_configuration\">Optional search fallback</string>"))
+        assertTrue(strings.contains("<string name=\"tavily_api_key\">Tavily API key (optional)</string>"))
         assertTrue(strings.contains("<string name=\"web_search_on\">Web search on</string>"))
         assertTrue(strings.contains("<string name=\"web_search_off\">Web search off</string>"))
         assertTrue(zhStrings.contains("name=\"web_search_configuration\""))
@@ -207,10 +228,11 @@ class ProviderSettingsScreenContractTest {
         assertTrue(screenSource.contains("private fun providerLogoRes("))
         assertFalse(editorBlock.contains("Card(\n        modifier = modifier.fillMaxSize()"))
         assertTrue(editorBlock.contains("CurrentProviderCard(provider = state.currentProvider)"))
-        assertTrue(editorBlock.contains("ProviderSection(title = stringResource(R.string.custom_api_configuration))"))
-        assertTrue(editorBlock.contains("ButtonDefaults.buttonColors("))
-        assertTrue(editorBlock.contains("containerColor = MaterialTheme.colorScheme.primary"))
-        assertTrue(editorBlock.contains("shape = RoundedCornerShape(12.dp)"))
+        assertTrue(editorBlock.contains("title = stringResource(R.string.custom_api_configuration)"))
+        assertTrue(screenSource.contains("private fun ProviderSaveButton("))
+        assertTrue(screenSource.contains("ButtonDefaults.buttonColors("))
+        assertTrue(screenSource.contains("containerColor = MaterialTheme.colorScheme.primary"))
+        assertTrue(screenSource.contains("shape = RoundedCornerShape(12.dp)"))
         assertTrue(presetBlock.contains("ButtonDefaults.outlinedButtonColors("))
         assertTrue(presetBlock.contains("ProviderLogo(providerName = preset.displayName"))
         assertTrue(presetBlock.contains("containerColor = MaterialTheme.colorScheme.surface"))

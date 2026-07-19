@@ -1,13 +1,12 @@
 package com.flowchat.app.presentation.chat
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Process
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,10 +54,15 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.foundation.shape.CircleShape
@@ -135,16 +139,24 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flowchat.app.BuildConfig
 import com.flowchat.app.R
+import com.flowchat.app.data.preferences.AppSettings
 import com.flowchat.app.domain.model.Conversation
+import com.flowchat.app.domain.model.MemoryRecord
 import com.flowchat.app.domain.model.Message
 import com.flowchat.app.domain.model.MessageRole
 import com.flowchat.app.domain.model.MessageStatus
 import com.flowchat.app.domain.model.ProviderConfig
+import com.flowchat.app.domain.device.DeviceCapability
+import com.flowchat.app.domain.device.AccessibilityConnectionState
+import com.flowchat.app.domain.device.AccessibilityConnectionStatus
+import com.flowchat.app.domain.device.ShizukuConnectionState
+import com.flowchat.app.domain.device.ShizukuConnectionStatus
 import com.flowchat.app.locale.AppLanguage
 import com.flowchat.app.locale.AppLocale
 import com.flowchat.app.presentation.common.findActivity
 import com.flowchat.app.ui.theme.AppAppearance
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
@@ -154,6 +166,17 @@ import kotlinx.coroutines.withContext
 private val OriginalSettingsIcon = Icons.Default.Settings
 private val ComposerToolHeight = 34.dp
 private const val BottomMessageAnchorKey = "bottom-message-anchor"
+private const val MaxAttachmentBytes = 256 * 1024
+private val SupportedAttachmentMimeTypes = arrayOf(
+    "text/*",
+    "application/json",
+    "application/xml",
+    "application/javascript"
+)
+private val SupportedAttachmentExtensions = setOf(
+    "txt", "md", "markdown", "json", "xml", "csv", "tsv", "yaml", "yml",
+    "kt", "kts", "java", "js", "ts", "py", "html", "css", "toml", "ini", "log"
+)
 
 @Composable
 private fun DrawerMenuIcon(
@@ -185,49 +208,6 @@ private fun DrawerMenuIcon(
     }
 }
 
-@Composable
-private fun ConversationSettingsIcon(
-    color: Color,
-    contentDescription: String,
-    modifier: Modifier = Modifier
-) {
-    val backgroundColor = MaterialTheme.colorScheme.background
-    Canvas(
-        modifier = modifier.semantics {
-            this.contentDescription = contentDescription
-        }
-    ) {
-        val lineStrokeWidth = 2.35.dp.toPx()
-        val knobStrokeWidth = 1.95.dp.toPx()
-        val knobRadius = 3.5.dp.toPx()
-        val lineStart = size.width * 0.06f
-        val lineEnd = size.width * 0.94f
-        val topKnob = Offset(size.width * 0.71f, size.height * 0.32f)
-        val bottomKnob = Offset(size.width * 0.32f, size.height * 0.68f)
-
-        listOf(topKnob, bottomKnob).forEach { knob ->
-            drawLine(
-                color = color,
-                start = Offset(lineStart, knob.y),
-                end = Offset(lineEnd, knob.y),
-                strokeWidth = lineStrokeWidth,
-                cap = StrokeCap.Round
-            )
-            drawCircle(
-                color = backgroundColor,
-                radius = knobRadius,
-                center = knob
-            )
-            drawCircle(
-                color = color,
-                radius = knobRadius,
-                center = knob,
-                style = Stroke(width = knobStrokeWidth)
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
@@ -237,9 +217,28 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val openDrawerDescription = stringResource(R.string.open_navigation_drawer)
+    val newChatDescription = stringResource(R.string.new_chat)
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        readTextAttachment(context, uri)
+                    }
+                }.onSuccess { attachment ->
+                    viewModel.attachTextFile(attachment.name, attachment.text)
+                }.onFailure { error ->
+                    viewModel.reportError(
+                        error.message ?: context.getString(R.string.attachment_read_failed)
+                    )
+                }
+            }
+        }
+    }
     val defaultUserName = stringResource(R.string.user_display_name)
     val initialUserProfile = remember(context, defaultUserName) {
         loadUserProfile(context, defaultUserName)
@@ -276,7 +275,6 @@ fun ChatScreen(
                         }
                         UserProfileEntry(
                             userName = userName,
-                            supportingText = stringResource(R.string.app_name),
                             avatarPath = userAvatarPath,
                             onClick = {
                                 scope.launch {
@@ -287,16 +285,6 @@ fun ChatScreen(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
                         )
                         Spacer(Modifier.height(10.dp))
-                        DrawerNavRow(
-                            label = stringResource(R.string.providers),
-                            icon = DrawerNavIcon.Provider,
-                            onClick = {
-                                scope.launch {
-                                    drawerState.close()
-                                    onOpenProviders()
-                                }
-                            }
-                        )
                         DrawerNavRow(
                             label = stringResource(R.string.settings),
                             icon = DrawerNavIcon.Settings,
@@ -309,24 +297,12 @@ fun ChatScreen(
                         )
                         Spacer(Modifier.height(12.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = stringResource(R.string.conversation_history),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = stringResource(R.string.edit),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        Text(
+                            text = stringResource(R.string.conversation_history),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+                        )
                         state.conversations.forEach { conversation ->
                             val isActiveConversation = conversation.id == state.currentConversation?.id
                             DrawerConversationRow(
@@ -354,6 +330,7 @@ fun ChatScreen(
                     IconButton(
                         onClick = { viewModel.newConversation() },
                         modifier = Modifier
+                            .semantics { contentDescription = newChatDescription }
                             .align(Alignment.BottomEnd)
                             .navigationBarsPadding()
                             .padding(24.dp)
@@ -405,11 +382,18 @@ fun ChatScreen(
                         ConversationHeaderTitle(
                             assistantAvatarPath = state.currentConversation?.assistantAvatarPath,
                             title = state.currentConversation?.displayAssistantTitle() ?: stringResource(R.string.app_name),
-                            modelName = state.currentConversation?.modelName.orEmpty()
+                            modelName = state.currentConversation?.modelName.orEmpty(),
+                            modifier = Modifier.clickable(
+                                enabled = state.currentConversation != null,
+                                onClick = { showSettings = true }
+                            )
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        IconButton(
+                            onClick = { scope.launch { drawerState.open() } },
+                            modifier = Modifier.semantics { contentDescription = openDrawerDescription }
+                        ) {
                             DrawerMenuIcon(
                                 color = MaterialTheme.colorScheme.onBackground,
                                 modifier = Modifier.size(30.dp)
@@ -418,9 +402,7 @@ fun ChatScreen(
                     },
                     actions = {
                         if (state.currentConversation != null) {
-                            IconButton(
-                                onClick = { showSettings = true }
-                            ) {
+                            IconButton(onClick = { showSettings = true }) {
                                 ConversationSettingsIcon(
                                     color = MaterialTheme.colorScheme.onBackground,
                                     contentDescription = stringResource(R.string.conversation_settings),
@@ -434,6 +416,7 @@ fun ChatScreen(
             bottomBar = {
                 MessageComposer(
                     value = state.input,
+                    pendingAttachment = state.pendingAttachment,
                     enabled = state.currentConversation != null,
                     isStreaming = state.isStreaming,
                     webSearchEnabled = state.webSearchEnabled,
@@ -443,6 +426,10 @@ fun ChatScreen(
                     onSend = viewModel::send,
                     onStop = viewModel::stop,
                     onToggleWebSearch = viewModel::toggleWebSearch,
+                    onPickAttachment = {
+                        attachmentPicker.launch(SupportedAttachmentMimeTypes)
+                    },
+                    onClearAttachment = viewModel::clearAttachment,
                     onSelectModel = viewModel::updateConversationModel
                 )
             }
@@ -455,7 +442,7 @@ fun ChatScreen(
                     .padding(horizontal = 12.dp)
             ) {
                 if (state.errorMessage != null) {
-                    AssistChip(onClick = {}, label = { Text(state.errorMessage.orEmpty()) })
+                    AssistChip(onClick = {}, label = { Text(localizedChatError(state.errorMessage.orEmpty())) })
                     Spacer(Modifier.height(8.dp))
                 }
                 MessageList(messages = state.messages, assistantAvatarPath = state.currentConversation?.assistantAvatarPath, userAvatarPath = userAvatarPath, showAvatars = state.currentConversation?.showAvatars == true, modifier = Modifier.weight(1f))
@@ -499,8 +486,28 @@ fun ChatScreen(
 
     if (showAppSettings) {
         AppSettingsSheet(
+            appSettings = state.appSettings,
+            memories = state.memories,
+            shizukuState = state.shizukuState,
+            accessibilityState = state.accessibilityState,
             appAppearance = appAppearance,
             onAppAppearanceChange = onAppAppearanceChange,
+            onOpenProviders = {
+                showAppSettings = false
+                onOpenProviders()
+            },
+            onMemoryEnabledChange = viewModel::setMemoryEnabled,
+            onAppUsageToolEnabledChange = viewModel::setAppUsageToolEnabled,
+            onRecentAppActivityToolEnabledChange = viewModel::setRecentAppActivityToolEnabled,
+            onOpenAppToolEnabledChange = viewModel::setOpenAppToolEnabled,
+            onDeviceAssistantEnabledChange = viewModel::setDeviceAssistantEnabled,
+            onForceStopToolEnabledChange = viewModel::setForceStopToolEnabled,
+            onRequestShizukuPermission = viewModel::requestShizukuPermission,
+            onRefreshShizuku = viewModel::refreshShizukuConnection,
+            onOpenAccessibilitySettings = viewModel::openAccessibilitySettings,
+            onRefreshAccessibility = viewModel::refreshAccessibilityConnection,
+            onDeleteMemory = viewModel::deleteMemory,
+            onClearMemories = viewModel::clearMemories,
             onDismiss = { showAppSettings = false }
         )
     }
@@ -513,6 +520,32 @@ fun ChatScreen(
                 viewModel.dismissUsageAccessPermissionRequest()
                 runCatching {
                     context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                }
+            }
+        )
+    }
+
+    state.pendingDeviceActionConfirmation?.let { confirmation ->
+        DeviceActionConfirmationDialog(
+            confirmation = confirmation,
+            onConfirm = viewModel::confirmDeviceAction,
+            onDismiss = viewModel::cancelDeviceAction
+        )
+    }
+
+    if (state.webSearchDisclosureRequired) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissWebSearchDisclosure,
+            title = { Text(stringResource(R.string.web_search_disclosure_title)) },
+            text = { Text(stringResource(R.string.web_search_disclosure_message)) },
+            confirmButton = {
+                TextButton(onClick = viewModel::acceptWebSearchDisclosure) {
+                    Text(stringResource(R.string.enable))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissWebSearchDisclosure) {
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -541,6 +574,20 @@ fun ChatScreen(
         )
     }
 }
+
+@Composable
+private fun localizedChatError(message: String): String =
+    when (message) {
+        "Create a provider first." -> stringResource(R.string.create_provider_first)
+        "Conversation not found." -> stringResource(R.string.conversation_not_found)
+        "Provider not found." -> stringResource(R.string.provider_not_found)
+        "Provider configuration is invalid." -> stringResource(R.string.provider_configuration_invalid)
+        "Provider returned an empty response." -> stringResource(R.string.empty_response_message)
+        "Tool call limit reached." -> stringResource(R.string.tool_call_limit_reached)
+        "Built-in web search is not configured." -> stringResource(R.string.web_search_not_configured)
+        "Built-in web search is temporarily unavailable." -> stringResource(R.string.web_search_unavailable)
+        else -> message
+    }
 
 @Composable
 private fun MessageList(
@@ -575,13 +622,53 @@ private fun MessageList(
 }
 
 @Composable
+private fun ConversationSettingsIcon(
+    color: Color,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = MaterialTheme.colorScheme.background
+    Canvas(
+        modifier = modifier.semantics {
+            this.contentDescription = contentDescription
+        }
+    ) {
+        val lineStrokeWidth = 2.35.dp.toPx()
+        val knobStrokeWidth = 1.95.dp.toPx()
+        val knobRadius = 3.5.dp.toPx()
+        val lineStart = size.width * 0.06f
+        val lineEnd = size.width * 0.94f
+        val topKnob = Offset(size.width * 0.71f, size.height * 0.32f)
+        val bottomKnob = Offset(size.width * 0.32f, size.height * 0.68f)
+
+        listOf(topKnob, bottomKnob).forEach { knob ->
+            drawLine(
+                color = color,
+                start = Offset(lineStart, knob.y),
+                end = Offset(lineEnd, knob.y),
+                strokeWidth = lineStrokeWidth,
+                cap = StrokeCap.Round
+            )
+            drawCircle(color = backgroundColor, radius = knobRadius, center = knob)
+            drawCircle(
+                color = color,
+                radius = knobRadius,
+                center = knob,
+                style = Stroke(width = knobStrokeWidth)
+            )
+        }
+    }
+}
+
+@Composable
 private fun ConversationHeaderTitle(
     assistantAvatarPath: String?,
     title: String,
-    modelName: String
+    modelName: String,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -611,13 +698,11 @@ private fun ConversationHeaderTitle(
 }
 
 private enum class DrawerNavIcon {
-    Provider,
     Settings
 }
 
 private fun drawerNavImageVector(icon: DrawerNavIcon): ImageVector =
     when (icon) {
-        DrawerNavIcon.Provider -> Icons.Outlined.Hub
         DrawerNavIcon.Settings -> Icons.Default.Settings
     }
 
@@ -700,7 +785,6 @@ private fun DrawerConversationRow(
 @Composable
 private fun UserProfileEntry(
     userName: String,
-    supportingText: String,
     avatarPath: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -722,24 +806,11 @@ private fun UserProfileEntry(
             avatarPath = avatarPath,
             size = 48.dp
         )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = userName,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1
-            )
-            Text(
-                text = supportingText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
+        Text(
+            text = userName,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            modifier = Modifier.weight(1f)
         )
     }
 }
@@ -831,12 +902,35 @@ private fun UserProfileSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppSettingsSheet(
+    appSettings: AppSettings,
+    memories: List<MemoryRecord>,
+    shizukuState: ShizukuConnectionState,
+    accessibilityState: AccessibilityConnectionState,
     appAppearance: AppAppearance,
     onAppAppearanceChange: (AppAppearance) -> Unit,
+    onOpenProviders: () -> Unit,
+    onMemoryEnabledChange: (Boolean) -> Unit,
+    onAppUsageToolEnabledChange: (Boolean) -> Unit,
+    onRecentAppActivityToolEnabledChange: (Boolean) -> Unit,
+    onOpenAppToolEnabledChange: (Boolean) -> Unit,
+    onDeviceAssistantEnabledChange: (Boolean) -> Unit,
+    onForceStopToolEnabledChange: (Boolean) -> Unit,
+    onRequestShizukuPermission: () -> Unit,
+    onRefreshShizuku: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onRefreshAccessibility: () -> Unit,
+    onDeleteMemory: (String) -> Unit,
+    onClearMemories: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val currentLanguage = AppLocale.getLanguage(context)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAppearanceDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showLifeToolsDialog by remember { mutableStateOf(false) }
+    var showDeviceAssistantDialog by remember { mutableStateOf(false) }
+    var showMemoryDialog by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -847,6 +941,8 @@ private fun AppSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -875,12 +971,48 @@ private fun AppSettingsSheet(
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     SettingsRow(
+                        title = stringResource(R.string.model_provider_configuration),
+                        icon = Icons.Outlined.Hub,
+                        onClick = onOpenProviders
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                    SettingsRow(
+                        title = stringResource(R.string.life_tools_permissions),
+                        icon = Icons.Default.Security,
+                        supportingText = stringResource(R.string.life_tools_summary),
+                        onClick = { showLifeToolsDialog = true }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                    SettingsRow(
+                        title = stringResource(R.string.device_assistant),
+                        icon = Icons.Default.PhoneAndroid,
+                        supportingText = stringResource(R.string.device_assistant_summary),
+                        trailingText = if (accessibilityState.isConnected) {
+                            accessibilityStatusLabel(accessibilityState.status)
+                        } else {
+                            shizukuStatusLabel(shizukuState.status)
+                        },
+                        onClick = {
+                            onRefreshShizuku()
+                            onRefreshAccessibility()
+                            showDeviceAssistantDialog = true
+                        }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                    SettingsRow(
+                        title = stringResource(R.string.memory),
+                        icon = Icons.Default.Memory,
+                        supportingText = stringResource(R.string.memory_summary),
+                        trailingText = memories.size.toString(),
+                        onClick = { showMemoryDialog = true }
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                    SettingsRow(
                         title = stringResource(R.string.language),
                         icon = Icons.Default.Language,
-                        onClick = {}
-                    ) {
-                        LanguageSelector(showLabel = false)
-                    }
+                        trailingText = stringResource(currentLanguage.labelRes()),
+                        onClick = { showLanguageDialog = true }
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
                     SettingsRow(
                         title = stringResource(R.string.appearance),
@@ -905,6 +1037,524 @@ private fun AppSettingsSheet(
             selected = appAppearance,
             onSelect = onAppAppearanceChange,
             onDismiss = { showAppearanceDialog = false }
+        )
+    }
+    if (showLanguageDialog) {
+        LanguageDialog(
+            selected = currentLanguage,
+            onSelect = { language ->
+                AppLocale.setLanguage(context, language)
+                showLanguageDialog = false
+                context.findActivity()?.recreate()
+            },
+            onDismiss = { showLanguageDialog = false }
+        )
+    }
+    if (showLifeToolsDialog) {
+        LifeToolsDialog(
+            appSettings = appSettings,
+            onAppUsageToolEnabledChange = onAppUsageToolEnabledChange,
+            onRecentAppActivityToolEnabledChange = onRecentAppActivityToolEnabledChange,
+            onOpenAppToolEnabledChange = onOpenAppToolEnabledChange,
+            onDismiss = { showLifeToolsDialog = false }
+        )
+    }
+    if (showDeviceAssistantDialog) {
+        DeviceAssistantDialog(
+            appSettings = appSettings,
+            shizukuState = shizukuState,
+            accessibilityState = accessibilityState,
+            onDeviceAssistantEnabledChange = onDeviceAssistantEnabledChange,
+            onForceStopToolEnabledChange = onForceStopToolEnabledChange,
+            onRequestShizukuPermission = onRequestShizukuPermission,
+            onRefreshShizuku = onRefreshShizuku,
+            onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+            onRefreshAccessibility = onRefreshAccessibility,
+            onOpenShizuku = {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))
+                    )
+                }
+            },
+            onDismiss = { showDeviceAssistantDialog = false }
+        )
+    }
+    if (showMemoryDialog) {
+        MemoryManagerDialog(
+            enabled = appSettings.memoryEnabled,
+            memories = memories,
+            onEnabledChange = onMemoryEnabledChange,
+            onDelete = onDeleteMemory,
+            onClear = onClearMemories,
+            onDismiss = { showMemoryDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun DeviceAssistantDialog(
+    appSettings: AppSettings,
+    shizukuState: ShizukuConnectionState,
+    accessibilityState: AccessibilityConnectionState,
+    onDeviceAssistantEnabledChange: (Boolean) -> Unit,
+    onForceStopToolEnabledChange: (Boolean) -> Unit,
+    onRequestShizukuPermission: () -> Unit,
+    onRefreshShizuku: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onRefreshAccessibility: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 640.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.device_assistant),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .background(
+                                color = if (shizukuState.isConnected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                },
+                                shape = CircleShape
+                            )
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = shizukuStatusLabel(shizukuState.status),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = shizukuState.detail ?: shizukuStatusDescription(shizukuState.status),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    when (shizukuState.status) {
+                        ShizukuConnectionStatus.NotInstalled -> TextButton(onClick = onOpenShizuku) {
+                            Text(stringResource(R.string.install_shizuku))
+                        }
+                        ShizukuConnectionStatus.PermissionRequired,
+                        ShizukuConnectionStatus.PermissionDenied -> TextButton(onClick = onRequestShizukuPermission) {
+                            Text(stringResource(R.string.shizuku_permission))
+                        }
+                        else -> TextButton(onClick = onRefreshShizuku) {
+                            Text(stringResource(R.string.refresh))
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .background(
+                                color = if (accessibilityState.isConnected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                },
+                                shape = CircleShape
+                            )
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.accessibility_screen_control),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = accessibilityState.detail
+                                ?: accessibilityStatusDescription(accessibilityState.status),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    if (accessibilityState.isConnected) {
+                        TextButton(onClick = onRefreshAccessibility) {
+                            Text(stringResource(R.string.refresh))
+                        }
+                    } else {
+                        TextButton(onClick = onOpenAccessibilitySettings) {
+                            Text(stringResource(R.string.enable_accessibility_service))
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                SettingsToggleRow(
+                    title = stringResource(R.string.device_assistant_enabled),
+                    supportingText = stringResource(R.string.device_assistant_enabled_description),
+                    checked = appSettings.deviceAssistantEnabled,
+                    enabled = shizukuState.isConnected || accessibilityState.isConnected,
+                    onCheckedChange = onDeviceAssistantEnabledChange
+                )
+                SettingsToggleRow(
+                    title = stringResource(R.string.force_stop_tool),
+                    supportingText = stringResource(R.string.force_stop_tool_description),
+                    checked = appSettings.forceStopToolEnabled,
+                    enabled = shizukuState.isConnected &&
+                        DeviceCapability.ForceStopApp in shizukuState.capabilities,
+                    onCheckedChange = onForceStopToolEnabledChange
+                )
+                Text(
+                    text = stringResource(R.string.available_capabilities),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                )
+                Text(
+                    text = if (shizukuState.capabilities.isEmpty()) {
+                        stringResource(R.string.no_available_capabilities)
+                    } else {
+                        shizukuState.capabilities.joinToString(" / ") { capability ->
+                            context.getString(capability.labelRes())
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                    Text(stringResource(R.string.done))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceActionConfirmationDialog(
+    confirmation: DeviceActionConfirmationUi,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.force_stop_confirmation_title, confirmation.title)) },
+        text = { Text(stringResource(R.string.force_stop_confirmation_message, confirmation.title)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun shizukuStatusLabel(status: ShizukuConnectionStatus): String = stringResource(
+    when (status) {
+        ShizukuConnectionStatus.NotInstalled -> R.string.shizuku_not_installed
+        ShizukuConnectionStatus.NotRunning -> R.string.shizuku_not_running
+        ShizukuConnectionStatus.PermissionRequired -> R.string.shizuku_permission_required
+        ShizukuConnectionStatus.PermissionDenied -> R.string.shizuku_permission_denied
+        ShizukuConnectionStatus.Connecting -> R.string.shizuku_connecting
+        ShizukuConnectionStatus.ConnectedAdb -> R.string.shizuku_connected_adb
+        ShizukuConnectionStatus.ConnectedRoot -> R.string.shizuku_connected_root
+        ShizukuConnectionStatus.Unsupported -> R.string.shizuku_unsupported
+        ShizukuConnectionStatus.Error -> R.string.shizuku_error
+    }
+)
+
+@Composable
+private fun shizukuStatusDescription(status: ShizukuConnectionStatus): String = stringResource(
+    when (status) {
+        ShizukuConnectionStatus.NotInstalled -> R.string.shizuku_not_installed_description
+        ShizukuConnectionStatus.NotRunning -> R.string.shizuku_not_running_description
+        ShizukuConnectionStatus.PermissionRequired -> R.string.shizuku_permission_required_description
+        ShizukuConnectionStatus.PermissionDenied -> R.string.shizuku_permission_denied_description
+        ShizukuConnectionStatus.Connecting -> R.string.shizuku_connecting_description
+        ShizukuConnectionStatus.ConnectedAdb -> R.string.shizuku_connected_adb_description
+        ShizukuConnectionStatus.ConnectedRoot -> R.string.shizuku_connected_root_description
+        ShizukuConnectionStatus.Unsupported -> R.string.shizuku_unsupported_description
+        ShizukuConnectionStatus.Error -> R.string.shizuku_error_description
+    }
+)
+
+@Composable
+private fun accessibilityStatusLabel(status: AccessibilityConnectionStatus): String = stringResource(
+    when (status) {
+        AccessibilityConnectionStatus.Disabled -> R.string.accessibility_disabled
+        AccessibilityConnectionStatus.Connected -> R.string.accessibility_connected
+        AccessibilityConnectionStatus.Unavailable -> R.string.accessibility_unavailable
+        AccessibilityConnectionStatus.Error -> R.string.accessibility_error
+    }
+)
+
+@Composable
+private fun accessibilityStatusDescription(status: AccessibilityConnectionStatus): String = stringResource(
+    when (status) {
+        AccessibilityConnectionStatus.Disabled -> R.string.accessibility_disabled_description
+        AccessibilityConnectionStatus.Connected -> R.string.accessibility_connected_description
+        AccessibilityConnectionStatus.Unavailable -> R.string.accessibility_unavailable_description
+        AccessibilityConnectionStatus.Error -> R.string.accessibility_error_description
+    }
+)
+
+private fun DeviceCapability.labelRes(): Int =
+    when (this) {
+        DeviceCapability.DeviceStatus -> R.string.capability_device_status
+        DeviceCapability.ForegroundApp -> R.string.capability_foreground_app
+        DeviceCapability.ScreenBrightness -> R.string.capability_screen_brightness
+        DeviceCapability.MediaVolume -> R.string.capability_media_volume
+        DeviceCapability.ForceStopApp -> R.string.capability_force_stop_app
+        DeviceCapability.ScreenObservation -> R.string.capability_screen_observation
+        DeviceCapability.UiElementAction -> R.string.capability_ui_actions
+        DeviceCapability.TextInput -> R.string.capability_text_input
+        DeviceCapability.ScreenSwipe -> R.string.capability_screen_swipe
+        DeviceCapability.Navigation -> R.string.capability_navigation
+    }
+
+@Composable
+private fun LifeToolsDialog(
+    appSettings: AppSettings,
+    onAppUsageToolEnabledChange: (Boolean) -> Unit,
+    onRecentAppActivityToolEnabledChange: (Boolean) -> Unit,
+    onOpenAppToolEnabledChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.life_tools_permissions),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                )
+                Text(
+                    text = stringResource(R.string.life_tools_privacy_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                )
+                SettingsToggleRow(
+                    title = stringResource(R.string.app_usage_tool),
+                    supportingText = stringResource(R.string.app_usage_tool_description),
+                    checked = appSettings.appUsageToolEnabled,
+                    onCheckedChange = onAppUsageToolEnabledChange
+                )
+                SettingsToggleRow(
+                    title = stringResource(R.string.recent_app_activity_tool),
+                    supportingText = stringResource(R.string.recent_app_activity_tool_description),
+                    checked = appSettings.recentAppActivityToolEnabled,
+                    onCheckedChange = onRecentAppActivityToolEnabledChange
+                )
+                SettingsToggleRow(
+                    title = stringResource(R.string.open_app_tool),
+                    supportingText = stringResource(R.string.open_app_tool_description),
+                    checked = appSettings.openAppToolEnabled,
+                    onCheckedChange = onOpenAppToolEnabledChange
+                )
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(stringResource(R.string.done))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    supportingText: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(horizontal = 4.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun MemoryManagerDialog(
+    enabled: Boolean,
+    memories: List<MemoryRecord>,
+    onEnabledChange: (Boolean) -> Unit,
+    onDelete: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var confirmClear by remember { mutableStateOf(false) }
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 560.dp),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.memory),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                )
+                SettingsToggleRow(
+                    title = stringResource(R.string.memory_enabled),
+                    supportingText = stringResource(R.string.memory_enabled_description),
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
+                if (memories.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.no_memories),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 24.dp)
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                        items(memories, key = { it.id }) { memory ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = memory.goal,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = memory.summary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
+                                    )
+                                }
+                                IconButton(onClick = { onDelete(memory.id) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.delete_memory)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f))
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    if (memories.isNotEmpty()) {
+                        TextButton(onClick = { confirmClear = true }) {
+                            Text(stringResource(R.string.clear_all))
+                        }
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.done))
+                    }
+                }
+            }
+        }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource(R.string.clear_memory_title)) },
+            text = { Text(stringResource(R.string.clear_memory_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClear()
+                    confirmClear = false
+                }) {
+                    Text(stringResource(R.string.clear_all))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
         )
     }
 }
@@ -934,8 +1584,7 @@ private fun AppearanceDialog(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
                 )
-                AppearanceOptionRow(
-                    appearance = AppAppearance.System,
+                SettingsSelectionOptionRow(
                     label = stringResource(R.string.appearance_system),
                     selected = selected == AppAppearance.System,
                     onClick = {
@@ -943,8 +1592,7 @@ private fun AppearanceDialog(
                         onDismiss()
                     }
                 )
-                AppearanceOptionRow(
-                    appearance = AppAppearance.Light,
+                SettingsSelectionOptionRow(
                     label = stringResource(R.string.appearance_light),
                     selected = selected == AppAppearance.Light,
                     onClick = {
@@ -952,8 +1600,7 @@ private fun AppearanceDialog(
                         onDismiss()
                     }
                 )
-                AppearanceOptionRow(
-                    appearance = AppAppearance.Dark,
+                SettingsSelectionOptionRow(
                     label = stringResource(R.string.appearance_dark),
                     selected = selected == AppAppearance.Dark,
                     onClick = {
@@ -967,8 +1614,52 @@ private fun AppearanceDialog(
 }
 
 @Composable
-private fun AppearanceOptionRow(
-    appearance: AppAppearance,
+private fun LanguageDialog(
+    selected: AppLanguage,
+    onSelect: (AppLanguage) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.language),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                SettingsSelectionOptionRow(
+                    label = stringResource(R.string.language_system),
+                    selected = selected == AppLanguage.System,
+                    onClick = { onSelect(AppLanguage.System) }
+                )
+                SettingsSelectionOptionRow(
+                    label = stringResource(R.string.language_zh_cn),
+                    selected = selected == AppLanguage.ChineseSimplified,
+                    onClick = { onSelect(AppLanguage.ChineseSimplified) }
+                )
+                SettingsSelectionOptionRow(
+                    label = stringResource(R.string.language_en),
+                    selected = selected == AppLanguage.English,
+                    onClick = { onSelect(AppLanguage.English) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSelectionOptionRow(
     label: String,
     selected: Boolean,
     onClick: () -> Unit
@@ -1022,19 +1713,27 @@ private fun AppAppearance.labelRes(): Int =
         AppAppearance.Dark -> R.string.appearance_dark
     }
 
+private fun AppLanguage.labelRes(): Int =
+    when (this) {
+        AppLanguage.System -> R.string.language_system
+        AppLanguage.ChineseSimplified -> R.string.language_zh_cn
+        AppLanguage.English -> R.string.language_en
+    }
+
 @Composable
 private fun UsageAccessPermissionDialog(
     toolName: String,
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
+    val displayToolName = localizedToolName(toolName)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(text = stringResource(R.string.usage_access_permission_title))
         },
         text = {
-            Text(text = stringResource(R.string.usage_access_permission_message, toolName))
+            Text(text = stringResource(R.string.usage_access_permission_message, displayToolName))
         },
         confirmButton = {
             TextButton(onClick = onOpenSettings) {
@@ -1047,6 +1746,70 @@ private fun UsageAccessPermissionDialog(
             }
         }
     )
+}
+
+@Composable
+private fun localizedToolName(toolName: String): String {
+    val baseName = toolName.substringBefore(':')
+    val detail = toolName.substringAfter(':', missingDelimiterValue = "").trim()
+    return when (baseName) {
+        "web_search" -> stringResource(R.string.web_search_short)
+        "get_app_usage_summary" -> stringResource(R.string.app_usage_tool)
+        "get_recent_app_activity" -> stringResource(R.string.recent_app_activity_tool)
+        "open_app" -> if (detail.isBlank()) {
+            stringResource(R.string.open_app_tool)
+        } else {
+            stringResource(R.string.open_app_named, detail)
+        }
+        "get_device_status" -> stringResource(R.string.capability_device_status)
+        "get_foreground_app" -> stringResource(R.string.capability_foreground_app)
+        "set_screen_brightness" -> stringResource(R.string.capability_screen_brightness)
+        "set_media_volume" -> stringResource(R.string.capability_media_volume)
+        "force_stop_app" -> if (detail.isBlank()) {
+            stringResource(R.string.capability_force_stop_app)
+        } else {
+            stringResource(R.string.force_stop_named, detail)
+        }
+        "observe_screen" -> stringResource(R.string.tool_name_observe_screen)
+        "tap_ui_element" -> stringResource(R.string.tool_name_tap_ui_element)
+        "input_text" -> stringResource(R.string.tool_name_input_text)
+        "swipe_screen" -> stringResource(R.string.tool_name_swipe_screen)
+        "press_back" -> stringResource(R.string.tool_name_press_back)
+        "press_home" -> stringResource(R.string.tool_name_press_home)
+        else -> toolName.ifBlank { "tool" }
+    }
+}
+
+@Composable
+private fun localizedToolAction(toolName: String): String {
+    val baseName = toolName.substringBefore(':')
+    val detail = toolName.substringAfter(':', missingDelimiterValue = "").trim()
+    return when (baseName) {
+        "web_search" -> stringResource(R.string.tool_action_web_search)
+        "get_app_usage_summary" -> stringResource(R.string.tool_action_app_usage)
+        "get_recent_app_activity" -> stringResource(R.string.tool_action_recent_activity)
+        "open_app" -> if (detail.isBlank()) {
+            stringResource(R.string.tool_action_open_app_generic)
+        } else {
+            stringResource(R.string.tool_action_open_app, detail)
+        }
+        "get_device_status" -> stringResource(R.string.tool_action_device_status)
+        "get_foreground_app" -> stringResource(R.string.tool_action_foreground_app)
+        "set_screen_brightness" -> stringResource(R.string.tool_action_brightness)
+        "set_media_volume" -> stringResource(R.string.tool_action_volume)
+        "force_stop_app" -> if (detail.isBlank()) {
+            stringResource(R.string.tool_action_force_stop_generic)
+        } else {
+            stringResource(R.string.tool_action_force_stop, detail)
+        }
+        "observe_screen" -> stringResource(R.string.tool_action_observe_screen)
+        "tap_ui_element" -> stringResource(R.string.tool_action_tap_ui_element)
+        "input_text" -> stringResource(R.string.tool_action_input_text)
+        "swipe_screen" -> stringResource(R.string.tool_action_swipe_screen)
+        "press_back" -> stringResource(R.string.tool_action_press_back)
+        "press_home" -> stringResource(R.string.tool_action_press_home)
+        else -> stringResource(R.string.tool_action_generic, localizedToolName(toolName))
+    }
 }
 
 @Composable
@@ -1139,10 +1902,24 @@ private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAv
     var showTextSelection by remember { mutableStateOf(false) }
     val displayContent = when {
         message.content.isNotBlank() -> message.content
+        message.attachmentName != null -> ""
         message.role == MessageRole.Assistant -> stringResource(R.string.empty_response_message)
         else -> "..."
     }
-    val copyText = if (!shouldShowContentBubble || isWaitingForAssistant) "" else displayContent
+    val copyText = if (!shouldShowContentBubble || isWaitingForAssistant) {
+        ""
+    } else {
+        buildString {
+            if (displayContent.isNotBlank()) append(displayContent)
+            if (message.attachmentName != null) {
+                if (isNotEmpty()) append("\n\n")
+                append("[").append(message.attachmentName).append("]")
+                message.attachmentText?.takeIf { it.isNotBlank() }?.let { text ->
+                    append("\n").append(text)
+                }
+            }
+        }
+    }
     val bubbleColor = if (isUser) {
         MaterialTheme.colorScheme.secondaryContainer
     } else {
@@ -1192,9 +1969,15 @@ private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAv
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                            message.attachmentName?.let { name ->
+                                AttachmentMessagePreview(name = name)
+                                if (displayContent.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            }
                             if (isWaitingForAssistant) {
                                 StreamingJumpingDots()
-                            } else {
+                            } else if (displayContent.isNotBlank()) {
                                 Text(
                                     text = displayContent,
                                     style = MaterialTheme.typography.bodyLarge,
@@ -1284,6 +2067,29 @@ private fun MessageBubble(message: Message, assistantAvatarPath: String?, userAv
 }
 
 @Composable
+private fun AttachmentMessagePreview(name: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 private fun ToolCallBubble(message: Message) {
     val context = LocalContext.current
     val messageTime = remember(context, message.createdAt) {
@@ -1291,16 +2097,19 @@ private fun ToolCallBubble(message: Message) {
     }
     val lines = remember(message.content) { message.content.lines() }
     val toolName = lines.firstOrNull()?.takeIf { it.isNotBlank() }.orEmpty()
+    val action = localizedToolAction(toolName)
     val detail = lines.drop(1).joinToString(separator = "\n").takeIf { it.isNotBlank() }
     val titleRes = when (message.status) {
-        MessageStatus.Streaming -> R.string.tool_call_running
-        MessageStatus.Complete -> R.string.tool_call_complete
-        MessageStatus.Failed -> R.string.tool_call_failed
-        else -> R.string.tool_call_complete
+        MessageStatus.Streaming -> R.string.tool_action_running
+        MessageStatus.Complete -> R.string.tool_action_complete
+        MessageStatus.Cancelled -> R.string.tool_action_cancelled
+        MessageStatus.Failed -> R.string.tool_action_failed
+        else -> R.string.tool_action_complete
     }
     val accentColor = when (message.status) {
         MessageStatus.Streaming -> MaterialTheme.colorScheme.primary
         MessageStatus.Complete -> MaterialTheme.colorScheme.tertiary
+        MessageStatus.Cancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
         MessageStatus.Failed -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.tertiary
     }
@@ -1331,7 +2140,7 @@ private fun ToolCallBubble(message: Message) {
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
-                            text = stringResource(titleRes, toolName.ifBlank { "tool" }),
+                            text = stringResource(titleRes, action),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1413,6 +2222,36 @@ private fun ReasoningBubble(message: Message, maxWidth: Dp) {
 private fun formatMessageTime(context: Context, timestampMillis: Long): String =
     android.text.format.DateFormat.getTimeFormat(context).format(Date(timestampMillis))
 
+private fun readTextAttachment(context: Context, uri: Uri): PendingAttachment {
+    val resolver = context.contentResolver
+    val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }?.takeIf { it.isNotBlank() } ?: "attachment.txt"
+    val mimeType = resolver.getType(uri).orEmpty().lowercase()
+    val extension = name.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    val supported = mimeType.startsWith("text/") ||
+        mimeType in SupportedAttachmentMimeTypes ||
+        extension in SupportedAttachmentExtensions
+    require(supported) { context.getString(R.string.attachment_text_only) }
+
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(8 * 1024)
+    resolver.openInputStream(uri)?.use { input ->
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            require(output.size() + count <= MaxAttachmentBytes) {
+                context.getString(R.string.attachment_too_large)
+            }
+            output.write(buffer, 0, count)
+        }
+    } ?: error(context.getString(R.string.attachment_read_failed))
+
+    val text = output.toByteArray().toString(Charsets.UTF_8)
+    require(!text.contains('\u0000')) { context.getString(R.string.attachment_text_only) }
+    return PendingAttachment(name = name, text = text)
+}
+
 @Composable
 private fun StreamingJumpingDots(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "streamingJumpingDots")
@@ -1462,6 +2301,7 @@ private fun StreamingJumpingDots(modifier: Modifier = Modifier) {
 @Composable
 private fun MessageComposer(
     value: String,
+    pendingAttachment: PendingAttachment?,
     enabled: Boolean,
     isStreaming: Boolean,
     webSearchEnabled: Boolean,
@@ -1471,6 +2311,8 @@ private fun MessageComposer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onToggleWebSearch: () -> Unit,
+    onPickAttachment: () -> Unit,
+    onClearAttachment: () -> Unit,
     onSelectModel: (ProviderConfig, String) -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -1479,7 +2321,8 @@ private fun MessageComposer(
     val inputMethodManager = remember(view) {
         view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
     }
-    val hasInput = value.isNotBlank()
+    val hasInput = value.isNotBlank() || pendingAttachment != null
+    val sendDescription = stringResource(if (isStreaming) R.string.stop else R.string.send)
     val modelOptions = remember(providers) { configuredModelOptions(providers) }
     val currentProvider = providers.firstOrNull { provider -> provider.id == currentConversation?.providerId }
     val isDarkBackground = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -1506,7 +2349,7 @@ private fun MessageComposer(
 
     fun submitMessage() {
         if (!enabled) return
-        if (value.isBlank()) return
+        if (value.isBlank() && pendingAttachment == null) return
         onSend()
         onValueChange("")
     }
@@ -1526,6 +2369,37 @@ private fun MessageComposer(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp)
     ) {
+        if (pendingAttachment != null) {
+            AssistChip(
+                onClick = {},
+                label = {
+                    Text(
+                        text = pendingAttachment.name,
+                        maxLines = 1
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                            imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                trailingIcon = {
+                    IconButton(
+                        onClick = onClearAttachment,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.remove_attachment),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                },
+                modifier = Modifier.widthIn(max = 240.dp)
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1571,12 +2445,26 @@ private fun MessageComposer(
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submitMessage() }),
+                trailingIcon = {
+                    IconButton(
+                        onClick = onPickAttachment,
+                        enabled = enabled && !isStreaming
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = stringResource(R.string.upload_file),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                },
                 maxLines = 5
             )
             IconButton(
                 onClick = if (isStreaming) onStop else ::submitMessage,
                 enabled = enabled || isStreaming,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier
+                    .size(40.dp)
+                    .semantics { contentDescription = sendDescription }
             ) {
                 if (isStreaming) {
                     StreamingStopIcon(mainColor = sendIconColor, modifier = Modifier.size(24.dp))
@@ -1616,6 +2504,7 @@ private fun ModelSwitchButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedDotColor = MaterialTheme.colorScheme.primary
+    val switchModelDescription = stringResource(R.string.switch_model)
     Box {
         Box(
             modifier = Modifier
@@ -1623,6 +2512,7 @@ private fun ModelSwitchButton(
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surface, CircleShape)
                 .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                .semantics { contentDescription = switchModelDescription }
                 .clickable(enabled = enabled) { expanded = true },
             contentAlignment = Alignment.Center
         ) {
@@ -1894,6 +2784,7 @@ private fun ConversationSettingsSheet(
     var temperature by remember(conversation.id) { mutableStateOf(conversation.temperature.toFloat()) }
     var topP by remember(conversation.id) { mutableStateOf(conversation.topP.toFloat()) }
     var maxTokens by remember(conversation.id) { mutableStateOf(conversation.maxTokens?.toString().orEmpty()) }
+    var showAdvancedParameters by remember(conversation.id) { mutableStateOf(false) }
     val settingsScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -1992,30 +2883,53 @@ private fun ConversationSettingsSheet(
                     minLines = 4,
                     maxLines = 8
                 )
-                SettingsLabeledSlider(
-                    title = stringResource(R.string.reply_style),
-                    startLabel = stringResource(R.string.concise),
-                    endLabel = stringResource(R.string.detailed),
-                    value = topP,
-                    onValueChange = { topP = it },
-                    valueRange = 0f..1f
-                )
-                SettingsLabeledSlider(
-                    title = stringResource(R.string.creativity),
-                    startLabel = stringResource(R.string.strict),
-                    endLabel = stringResource(R.string.playful),
-                    value = temperature / 2f,
-                    onValueChange = { temperature = it * 2f },
-                    valueRange = 0f..1f
-                )
-                OutlinedTextField(
-                    value = maxTokens,
-                    onValueChange = { value -> maxTokens = value.filter { it.isDigit() } },
-                    label = { Text(stringResource(R.string.max_tokens)) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = flowTextFieldColors(),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { showAdvancedParameters = !showAdvancedParameters }
+                        .padding(horizontal = 12.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.advanced_parameters),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = stringResource(
+                            if (showAdvancedParameters) R.string.thinking_collapse else R.string.thinking_expand
+                        ),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (showAdvancedParameters) {
+                    SettingsLabeledSlider(
+                        title = stringResource(R.string.reply_style),
+                        startLabel = stringResource(R.string.concise),
+                        endLabel = stringResource(R.string.detailed),
+                        value = topP,
+                        onValueChange = { topP = it },
+                        valueRange = 0f..1f
+                    )
+                    SettingsLabeledSlider(
+                        title = stringResource(R.string.creativity),
+                        startLabel = stringResource(R.string.strict),
+                        endLabel = stringResource(R.string.playful),
+                        value = temperature / 2f,
+                        onValueChange = { temperature = it * 2f },
+                        valueRange = 0f..1f
+                    )
+                    OutlinedTextField(
+                        value = maxTokens,
+                        onValueChange = { value -> maxTokens = value.filter { it.isDigit() } },
+                        label = { Text(stringResource(R.string.max_tokens)) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = flowTextFieldColors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
             Button(
                 onClick = {
@@ -2297,16 +3211,6 @@ private fun saveUserProfile(context: Context, profileName: String, profileAvatar
         .apply()
 }
 
-private fun hasUsageStatsPermission(context: Context): Boolean {
-    val appOps = context.getSystemService(AppOpsManager::class.java) ?: return false
-    val mode = appOps.checkOpNoThrow(
-        AppOpsManager.OPSTR_GET_USAGE_STATS,
-        Process.myUid(),
-        context.packageName
-    )
-    return mode == AppOpsManager.MODE_ALLOWED
-}
-
 private fun copyUserAvatarToPrivateFile(context: Context, uri: Uri): String? {
     return runCatching {
         val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
@@ -2367,60 +3271,6 @@ private fun Bitmap.scaleToMax(maxSize: Int): Bitmap {
 private const val UserProfilePrefsName = "user_profile"
 private const val UserProfileNameKey = "name"
 private const val UserProfileAvatarKey = "avatar_path"
-
-@Composable
-private fun LanguageSelector(modifier: Modifier = Modifier, showLabel: Boolean = true) {
-    val context = LocalContext.current
-    var currentLanguage by remember { mutableStateOf(AppLocale.getLanguage(context)) }
-
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (showLabel) {
-            Text(stringResource(R.string.language), style = MaterialTheme.typography.labelLarge)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LanguageChip(
-                text = stringResource(R.string.language_system),
-                selected = currentLanguage == AppLanguage.System,
-                onClick = {
-                    currentLanguage = AppLanguage.System
-                    AppLocale.setLanguage(context, AppLanguage.System)
-                    context.findActivity()?.recreate()
-                }
-            )
-            LanguageChip(
-                text = stringResource(R.string.language_zh_cn),
-                selected = currentLanguage == AppLanguage.ChineseSimplified,
-                onClick = {
-                    currentLanguage = AppLanguage.ChineseSimplified
-                    AppLocale.setLanguage(context, AppLanguage.ChineseSimplified)
-                    context.findActivity()?.recreate()
-                }
-            )
-            LanguageChip(
-                text = stringResource(R.string.language_en),
-                selected = currentLanguage == AppLanguage.English,
-                onClick = {
-                    currentLanguage = AppLanguage.English
-                    AppLocale.setLanguage(context, AppLanguage.English)
-                    context.findActivity()?.recreate()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun LanguageChip(text: String, selected: Boolean, onClick: () -> Unit) {
-    AssistChip(
-        onClick = onClick,
-        label = {
-            Text(
-                text = if (selected) "$text *" else text,
-                style = MaterialTheme.typography.labelMedium
-            )
-        }
-    )
-}
 
 @Composable
 private fun Conversation.displayTitle(): String {

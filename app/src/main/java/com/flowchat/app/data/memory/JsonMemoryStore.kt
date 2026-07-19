@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 
 class JsonMemoryStore(
     private val file: File,
+    private val retentionLimit: Int = DefaultRetentionLimit,
     private val json: Json = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
@@ -31,10 +32,17 @@ class JsonMemoryStore(
             quality = if (assistantReply.length > HighQualityReplyThreshold) QualityHigh else QualityLow,
             timestamp = timestamp
         )
-        val updated = readAll() + record
-        file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(ListSerializer(MemoryRecord.serializer()), updated), Charsets.UTF_8)
+        val updated = (readAll() + record).takeLast(retentionLimit.coerceAtLeast(1))
+        writeAll(updated)
         return record
+    }
+
+    fun delete(id: String) {
+        writeAll(readAll().filterNot { it.id == id })
+    }
+
+    fun clear() {
+        if (file.exists()) file.delete()
     }
 
     fun retrieve(userMessage: String, topN: Int): List<MemoryRecord> {
@@ -59,6 +67,11 @@ class JsonMemoryStore(
 
     private fun buildSummary(userMessage: String, assistantReply: String): String =
         "用户：${userMessage.oneLine().limit(SummaryPartMaxLength)} / 助手：${assistantReply.oneLine().limit(SummaryPartMaxLength)}"
+
+    private fun writeAll(records: List<MemoryRecord>) {
+        file.parentFile?.mkdirs()
+        file.writeText(json.encodeToString(ListSerializer(MemoryRecord.serializer()), records), Charsets.UTF_8)
+    }
 
     private fun String.firstSentence(): String {
         val trimmed = oneLine()
@@ -98,6 +111,7 @@ class JsonMemoryStore(
         const val QualityLow = "low"
         private const val HighQualityReplyThreshold = 200
         private const val MaxRetrievedMemories = 5
+        private const val DefaultRetentionLimit = 200
         private const val GoalMaxLength = 120
         private const val SummaryPartMaxLength = 80
         private val SentenceTerminators = setOf('。', '！', '？', '.', '!', '?', '\n')

@@ -354,6 +354,34 @@ class ChatRequestFactoryTest {
         assertEquals("What happened today?", request.messages[4].content)
     }
 
+    @Test
+    fun keepsAttachedTextInConversationContextWithoutChangingVisibleMessageText() {
+        val request = ChatRequestFactory.create(
+            conversation = Conversation(id = "c1", providerId = "p1", modelName = "gpt-test"),
+            messages = listOf(
+                Message(
+                    conversationId = "c1",
+                    role = MessageRole.User,
+                    content = "请总结附件",
+                    attachmentName = "notes.txt",
+                    attachmentText = "第一行\n第二行"
+                )
+            )
+        )
+
+        assertEquals(
+            """
+            请总结附件
+
+            <attached-file name="notes.txt">
+            第一行
+            第二行
+            </attached-file>
+            """.trimIndent(),
+            request.messages.single().content
+        )
+    }
+
     private fun expectedSystemPrompt(prompt: String): String = buildString {
         appendLine("# FlowChat conversation instructions")
         appendLine("You are FlowChat's assistant in this conversation.")

@@ -1,0 +1,190 @@
+package com.flowchat.app.data.device
+
+import android.content.Context
+import androidx.annotation.Keep
+import com.flowchat.app.domain.device.DeviceCapability
+import com.flowchat.app.shizuku.IFlowChatShizukuService
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+import org.json.JSONObject
+
+@Keep
+class FlowChatShizukuService : IFlowChatShizukuService.Stub {
+    constructor() : super()
+
+    @Keep
+    constructor(@Suppress("UNUSED_PARAMETER") context: Context) : super()
+
+    override fun destroy() {
+        System.exit(0)
+    }
+
+    override fun probeCapabilities(): String = buildSet {
+        if (runCommand("dumpsys", "battery").success) add(DeviceCapability.DeviceStatus.name)
+        if (foregroundPackage() != null) add(DeviceCapability.ForegroundApp.name)
+        if (currentBrightness() != null) add(DeviceCapability.ScreenBrightness.name)
+        if (currentMediaVolume() != null) add(DeviceCapability.MediaVolume.name)
+        if (runCommand("am", "get-current-user").success) add(DeviceCapability.ForceStopApp.name)
+    }.joinToString(",")
+
+    override fun getDeviceStatus(): String {
+        val batteryDump = runCommand("dumpsys", "battery").output
+        val level = Regex("level:\\s*(\\d+)").find(batteryDump)?.groupValues?.get(1)
+        val scale = Regex("scale:\\s*(\\d+)").find(batteryDump)?.groupValues?.get(1)
+        val batteryPercent = level?.toIntOrNull()?.let { raw ->
+            val maximum = scale?.toIntOrNull()?.takeIf { it > 0 } ?: 100
+            (raw * 100 / maximum).coerceIn(0, 100)
+        }
+        val storageLine = runCommand("df", "-k", "/data").output.lineSequence()
+            .filter { it.isNotBlank() }
+            .lastOrNull()
+        val storageParts = storageLine?.trim()?.split(Regex("\\s+"))
+        val freeStorageKb = storageParts?.getOrNull(3)?.toLongOrNull()
+        val brightness = currentBrightness()?.let { (it * 100f / 255f).roundToInt().coerceIn(0, 100) }
+        val volume = currentMediaVolume()?.let { current ->
+            (current.value * 100f / current.max.coerceAtLeast(1)).roundToInt().coerceIn(0, 100)
+        }
+        val summary = buildList {
+            batteryPercent?.let { add("battery=$it%") }
+            freeStorageKb?.let { add("free_storage_mb=${it / 1024}") }
+            brightness?.let { add("brightness=$it%") }
+            volume?.let { add("media_volume=$it%") }
+        }.joinToString(", ").ifBlank { "Device status could not be read." }
+        return response(summary.isNotBlank(), summary, errorCode = "device_status_unavailable".takeIf { summary.isBlank() })
+    }
+
+    override fun getForegroundApp(): String {
+        val packageName = foregroundPackage()
+            ?: return response(false, "The foreground app could not be determined.", errorCode = "foreground_unavailable")
+        return response(true, "foreground_package=$packageName")
+    }
+
+    override fun setScreenBrightness(percent: Int): String {
+        val normalized = percent.coerceIn(1, 100)
+        val beforeRaw = currentBrightness()
+            ?: return response(false, "Current screen brightness could not be read.", errorCode = "brightness_unavailable")
+        val before = (beforeRaw * 100f / 255f).roundToInt().coerceIn(0, 100)
+        val targetRaw = (normalized * 255f / 100f).roundToInt().coerceIn(1, 255)
+        val command = runCommand("settings", "put", "system", "screen_brightness", targetRaw.toString())
+        if (!command.success) {
+            return response(false, command.output.ifBlank { "Brightness change failed." }, errorCode = "brightness_write_failed")
+        }
+        val afterRaw = currentBrightness()
+            ?: return response(false, "Brightness changed but verification failed.", before = "$before%", errorCode = "brightness_verify_failed")
+        val after = (afterRaw * 100f / 255f).roundToInt().coerceIn(0, 100)
+        return response(
+            success = kotlin.math.abs(after - normalized) <= 2,
+            summary = "Screen brightness is $after%.",
+            before = "$before%",
+            after = "$after%",
+            reversible = true,
+            errorCode = "brightness_verify_failed".takeIf { kotlin.math.abs(after - normalized) > 2 }
+        )
+    }
+
+    override fun setMediaVolume(percent: Int): String {
+        val normalized = percent.coerceIn(0, 100)
+        val before = currentMediaVolume()
+            ?: return response(false, "Current media volume could not be read.", errorCode = "volume_unavailable")
+        val target = (normalized * before.max / 100f).roundToInt().coerceIn(0, before.max)
+        val command = runCommand(
+            "cmd", "media_session", "volume", "--stream", "3", "--set", target.toString()
+        )
+        if (!command.success) {
+            return response(false, command.output.ifBlank { "Media volume change failed." }, errorCode = "volume_write_failed")
+        }
+        val after = currentMediaVolume()
+            ?: return response(false, "Media volume changed but verification failed.", errorCode = "volume_verify_failed")
+        val beforePercent = (before.value * 100f / before.max.coerceAtLeast(1)).roundToInt()
+        val afterPercent = (after.value * 100f / after.max.coerceAtLeast(1)).roundToInt()
+        return response(
+            success = after.value == target,
+            summary = "Media volume is $afterPercent%.",
+            before = "$beforePercent%",
+            after = "$afterPercent%",
+            reversible = true,
+            errorCode = "volume_verify_failed".takeIf { after.value != target }
+        )
+    }
+
+    override fun forceStopPackage(packageName: String): String {
+        val normalized = packageName.trim()
+        if (!PackageNamePattern.matches(normalized) || normalized == FlowChatPackageName) {
+            return response(false, "The requested package is not allowed.", errorCode = "invalid_package")
+        }
+        val result = runCommand("am", "force-stop", "--user", "current", normalized)
+        return if (result.success) {
+            response(true, "Force stopped package $normalized.")
+        } else {
+            response(false, result.output.ifBlank { "Force stop failed." }, errorCode = "force_stop_failed")
+        }
+    }
+
+    private fun currentBrightness(): Int? =
+        runCommand("settings", "get", "system", "screen_brightness")
+            .takeIf { it.success }
+            ?.output
+            ?.trim()
+            ?.toIntOrNull()
+
+    private fun currentMediaVolume(): MediaVolume? {
+        val output = runCommand("cmd", "media_session", "volume", "--stream", "3", "--get")
+            .takeIf { it.success }
+            ?.output
+            ?: return null
+        val match = Regex("volume is (\\d+) in range \\[(\\d+)\\.\\.(\\d+)]").find(output) ?: return null
+        return MediaVolume(
+            value = match.groupValues[1].toInt(),
+            max = match.groupValues[3].toInt()
+        )
+    }
+
+    private fun foregroundPackage(): String? {
+        val activities = runCommand("dumpsys", "activity", "activities").output
+        return Regex("mResumedActivity:.*? ([A-Za-z0-9._]+)/").find(activities)?.groupValues?.get(1)
+            ?: Regex("topResumedActivity=.*? ([A-Za-z0-9._]+)/").find(activities)?.groupValues?.get(1)
+            ?: runCommand("dumpsys", "window", "windows").output.let { windows ->
+                Regex("mCurrentFocus=.*? ([A-Za-z0-9._]+)/").find(windows)?.groupValues?.get(1)
+            }
+    }
+
+    private fun runCommand(vararg command: String): CommandResult = runCatching {
+        val process = ProcessBuilder(command.toList())
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        if (!process.waitFor(CommandTimeoutSeconds, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            CommandResult(false, "Command timed out.")
+        } else {
+            CommandResult(process.exitValue() == 0, output)
+        }
+    }.getOrElse { error ->
+        CommandResult(false, error.message ?: "Command failed.")
+    }
+
+    private fun response(
+        success: Boolean,
+        summary: String,
+        before: String? = null,
+        after: String? = null,
+        reversible: Boolean = false,
+        errorCode: String? = null
+    ): String = JSONObject().apply {
+        put("success", success)
+        put("summary", summary)
+        before?.let { put("before", it) }
+        after?.let { put("after", it) }
+        put("reversible", reversible)
+        errorCode?.let { put("errorCode", it) }
+    }.toString()
+
+    private data class CommandResult(val success: Boolean, val output: String)
+    private data class MediaVolume(val value: Int, val max: Int)
+
+    private companion object {
+        const val FlowChatPackageName = "com.flowchat.app"
+        const val CommandTimeoutSeconds = 5L
+        val PackageNamePattern = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
+    }
+}

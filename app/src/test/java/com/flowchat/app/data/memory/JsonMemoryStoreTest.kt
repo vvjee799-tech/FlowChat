@@ -71,4 +71,23 @@ class JsonMemoryStoreTest {
 
         assertEquals(listOf("最新偏好。", "中间偏好。"), results.map { it.goal })
     }
+
+    @Test
+    fun capsStoredMemoriesAndSupportsDeleteAndClear() {
+        val file = File.createTempFile("flowchat-memory", ".json").apply { deleteOnExit() }
+        val store = JsonMemoryStore(file, retentionLimit = 3)
+        val first = store.appendTurn("第一条。", "a".repeat(220), 1000L)
+        store.appendTurn("第二条。", "b".repeat(220), 2000L)
+        val third = store.appendTurn("第三条。", "c".repeat(220), 3000L)
+        store.appendTurn("第四条。", "d".repeat(220), 4000L)
+
+        assertEquals(listOf("第二条。", "第三条。", "第四条。"), store.readAll().map { it.goal })
+        assertTrue(store.readAll().none { it.id == first.id })
+
+        store.delete(third.id)
+        assertEquals(listOf("第二条。", "第四条。"), store.readAll().map { it.goal })
+
+        store.clear()
+        assertTrue(store.readAll().isEmpty())
+    }
 }

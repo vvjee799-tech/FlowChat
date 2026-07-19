@@ -87,7 +87,7 @@ class ChatViewModelContractTest {
         assertTrue(source.contains("ChatRequestMessage("))
         assertTrue(source.contains("role = \"tool\""))
         assertTrue(source.contains("toolCallId = call.id"))
-        assertTrue(source.contains("webSearchClient.search(query, tavilyApiKey)"))
+        assertTrue(source.contains("webSearchClient.search(query, tavilyApiKey, installId)"))
         assertTrue(source.contains("MaxToolCallRounds"))
     }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +30,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,11 +42,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -69,16 +74,24 @@ fun ProviderSettingsScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            CenterAlignedTopAppBar(
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                     navigationIconContentColor = MaterialTheme.colorScheme.onBackground
                 ),
-                title = { Text(stringResource(R.string.provider_configuration)) },
+                title = {
+                    Text(
+                        text = stringResource(R.string.provider_configuration),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.navigate_back)
+                        )
                     }
                 }
             )
@@ -122,6 +135,10 @@ private fun ProviderEditor(
     modifier: Modifier = Modifier
 ) {
     val provider = state.selected
+    var customConfigurationExpanded by rememberSaveable(provider?.id, state.currentProvider?.id) {
+        mutableStateOf(state.currentProvider == null || state.currentProvider.id == provider?.id)
+    }
+    var searchFallbackExpanded by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -142,13 +159,18 @@ private fun ProviderEditor(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         CurrentProviderCard(provider = state.currentProvider)
-        ProviderSection(title = stringResource(R.string.custom_api_configuration)) {
+        ProviderSection(
+            title = stringResource(R.string.custom_api_configuration),
+            expanded = customConfigurationExpanded,
+            onToggle = { customConfigurationExpanded = !customConfigurationExpanded }
+        ) {
             OutlinedTextField(
                 value = provider.displayName,
                 onValueChange = { value -> onUpdate { it.copy(displayName = value) } },
                 label = { Text(stringResource(R.string.provider_name)) },
                 shape = RoundedCornerShape(14.dp),
                 colors = providerTextFieldColors(),
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
@@ -157,6 +179,7 @@ private fun ProviderEditor(
                 label = { Text(stringResource(R.string.base_url)) },
                 shape = RoundedCornerShape(14.dp),
                 colors = providerTextFieldColors(),
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             Box(modifier = Modifier.fillMaxWidth()) {
@@ -174,6 +197,7 @@ private fun ProviderEditor(
                     },
                     shape = RoundedCornerShape(14.dp),
                     colors = providerTextFieldColors(),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 DropdownMenu(
@@ -191,7 +215,7 @@ private fun ProviderEditor(
                         }
                         state.modelListError != null -> {
                             DropdownMenuItem(
-                                text = { Text(state.modelListError) },
+                                text = { Text(localizedProviderMessage(state.modelListError)) },
                                 onClick = {},
                                 enabled = false
                             )
@@ -239,8 +263,13 @@ private fun ProviderEditor(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            ProviderSaveButton(onSave = onSave)
         }
-        ProviderSection(title = stringResource(R.string.web_search_configuration)) {
+        ProviderSection(
+            title = stringResource(R.string.web_search_configuration),
+            expanded = searchFallbackExpanded,
+            onToggle = { searchFallbackExpanded = !searchFallbackExpanded }
+        ) {
             val tavilySavedMaskVisible = state.hasTavilyApiKey && state.tavilyApiKey.isBlank()
             val displayedTavilyApiKey = if (tavilySavedMaskVisible) SavedApiKeyDisplayValue else state.tavilyApiKey
             OutlinedTextField(
@@ -266,21 +295,9 @@ private fun ProviderEditor(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+            ProviderSaveButton(onSave = onSave)
         }
-        state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        Button(
-            onClick = onSave,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        ) {
-            Text(stringResource(R.string.save))
-        }
+        state.message?.let { Text(localizedProviderMessage(it), color = MaterialTheme.colorScheme.primary) }
     }
     state.pendingPreset?.let { preset ->
         PresetApiKeyDialog(
@@ -289,6 +306,35 @@ private fun ProviderEditor(
             onDismiss = onDismissPresetApiKeyDialog,
             onSave = onSavePresetApiKey
         )
+    }
+}
+
+@Composable
+private fun localizedProviderMessage(message: String): String {
+    if (message.startsWith("Invalid provider:")) {
+        val blankBaseUrl = stringResource(R.string.provider_error_blank_base_url)
+        val invalidBaseUrl = stringResource(R.string.provider_error_invalid_base_url)
+        val insecureUrl = stringResource(R.string.provider_error_insecure_url)
+        val blankModel = stringResource(R.string.provider_error_blank_model)
+        val blankName = stringResource(R.string.provider_error_blank_name)
+        val details = message.substringAfter(':').split(',').joinToString { error ->
+            when (error.trim()) {
+                "BlankBaseUrl" -> blankBaseUrl
+                "InvalidBaseUrl" -> invalidBaseUrl
+                "InsecurePublicUrl" -> insecureUrl
+                "BlankModel" -> blankModel
+                "BlankName" -> blankName
+                else -> error.trim()
+            }
+        }
+        return stringResource(R.string.invalid_provider, details)
+    }
+    return when (message) {
+        "Saved" -> stringResource(R.string.saved)
+        "API key is required." -> stringResource(R.string.api_key_required)
+        "No models found." -> stringResource(R.string.no_models_found)
+        "Failed to load model list." -> stringResource(R.string.model_list_failed)
+        else -> message
     }
 }
 
@@ -370,6 +416,8 @@ private fun CurrentProviderCard(
 @Composable
 private fun ProviderSection(
     title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
@@ -382,12 +430,51 @@ private fun ProviderSection(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            content()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.thinking_collapse else R.string.thinking_expand
+                    ),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f)
+                )
+            }
+            if (expanded) {
+                content()
+            }
         }
+    }
+}
+
+@Composable
+private fun ProviderSaveButton(onSave: () -> Unit) {
+    Button(
+        onClick = onSave,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        )
+    ) {
+        Text(stringResource(R.string.save))
     }
 }
 
@@ -413,14 +500,14 @@ private fun ProviderPresetSection(
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
-                        .height(84.dp)
-                        .widthIn(min = 84.dp)
+                        .height(64.dp)
+                        .widthIn(min = 112.dp)
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ProviderLogo(providerName = preset.displayName, modifier = Modifier.size(28.dp))
+                        ProviderLogo(providerName = preset.displayName, modifier = Modifier.size(24.dp))
                         Text(preset.displayName, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }

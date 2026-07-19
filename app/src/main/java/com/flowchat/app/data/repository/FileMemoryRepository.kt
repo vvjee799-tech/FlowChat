@@ -35,6 +35,29 @@ class FileMemoryRepository @Inject constructor(
         }
     }
 
+    override suspend fun getAll(): List<MemoryRecord> =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                store.readAll().sortedByDescending { it.timestamp }
+            }
+        }
+
+    override suspend fun delete(id: String) {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                store.delete(id)
+            }
+        }
+    }
+
+    override suspend fun clear() {
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                store.clear()
+            }
+        }
+    }
+
     private companion object {
         const val MemoryStoreFileName = "memory_store.json"
     }

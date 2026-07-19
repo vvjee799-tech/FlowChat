@@ -221,11 +221,11 @@ class ProviderSettingsViewModelTest {
         )
         advanceUntilIdle()
 
-        val preset = ProviderTemplates.popularPresets().first { it.id == "preset-claude" }
+        val preset = ProviderTemplates.popularPresets().first { it.id == "preset-deepseek" }
         viewModel.applyPreset(preset)
         advanceUntilIdle()
 
-        val state = viewModel.uiState.first { it.pendingPreset?.id == "preset-claude" }
+        val state = viewModel.uiState.first { it.pendingPreset?.id == "preset-deepseek" }
         assertEquals("provider-custom", state.selected?.id)
         assertEquals("Custom configuration", state.selected?.displayName)
         assertEquals("https://old.example.com/v1", state.selected?.baseUrl)
@@ -236,15 +236,15 @@ class ProviderSettingsViewModelTest {
         assertEquals(true, state.hasApiKey)
         assertEquals(0, providerRepository.upsertCount)
 
-        viewModel.updatePresetApiKey("sk-claude")
+        viewModel.updatePresetApiKey("sk-deepseek")
         viewModel.savePresetApiKey()
         advanceUntilIdle()
 
-        val savedPreset = providerRepository.getProvider("provider-claude")
-        assertEquals("Claude", savedPreset?.displayName)
-        assertEquals("https://api.anthropic.com/v1", savedPreset?.baseUrl)
-        assertEquals("claude-sonnet-4-6", savedPreset?.defaultModel)
-        assertEquals("sk-claude", providerRepository.getApiKey(requireNotNull(savedPreset)))
+        val savedPreset = providerRepository.getProvider("provider-deepseek")
+        assertEquals("DeepSeek", savedPreset?.displayName)
+        assertEquals("https://api.deepseek.com", savedPreset?.baseUrl)
+        assertEquals("deepseek-v4-flash", savedPreset?.defaultModel)
+        assertEquals("sk-deepseek", providerRepository.getApiKey(requireNotNull(savedPreset)))
         assertEquals("Custom configuration", viewModel.uiState.value.selected?.displayName)
         assertEquals(null, viewModel.uiState.value.pendingPreset)
         assertEquals("", viewModel.uiState.value.presetApiKey)

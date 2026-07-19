@@ -6,10 +6,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.view.WindowCompat
 import com.flowchat.app.locale.AppLocale
 import com.flowchat.app.presentation.FlowChatRoot
 import com.flowchat.app.presentation.SplashTransition
@@ -29,13 +32,25 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             var appAppearance by remember { mutableStateOf(AppAppearance.load(this)) }
+            val systemDark = isSystemInDarkTheme()
+            val useDarkSystemBars = when (appAppearance) {
+                AppAppearance.System -> systemDark
+                AppAppearance.Dark -> true
+                AppAppearance.Light -> false
+            }
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !useDarkSystemBars
+                    isAppearanceLightNavigationBars = !useDarkSystemBars
+                }
+            }
             FlowChatTheme(appAppearance = appAppearance) {
-                SplashTransition(appAppearance = appAppearance, content = {
+                SplashTransition(appAppearance = appAppearance) {
                     FlowChatRoot(appAppearance = appAppearance, onAppAppearanceChange = { appearance ->
                         appAppearance = appearance
                         AppAppearance.save(this, appearance)
                     })
-                })
+                }
             }
         }
     }

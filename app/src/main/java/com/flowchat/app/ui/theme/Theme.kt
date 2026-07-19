@@ -5,13 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 
 private val LightColors = lightColorScheme(
@@ -31,6 +28,10 @@ private val LightColors = lightColorScheme(
     onSurface = Color(0xFF101214),
     surfaceVariant = Color(0xFFECEFF3),
     onSurfaceVariant = Color(0xFF5B6470),
+    surfaceContainerLow = Color(0xFFF2F4F7),
+    surfaceContainer = Color(0xFFECEFF3),
+    surfaceContainerHigh = Color(0xFFE6E9ED),
+    surfaceContainerHighest = Color(0xFFDDE2E8),
     outline = Color(0xFF77808C),
     outlineVariant = Color(0xFFD9DEE5),
     error = Color(0xFFB42318),
@@ -54,6 +55,10 @@ private val DarkColors = darkColorScheme(
     onSurface = Color(0xFFE9EEF4),
     surfaceVariant = Color(0xFF1B2229),
     onSurfaceVariant = Color(0xFFB7C0C9),
+    surfaceContainerLow = Color(0xFF0D1217),
+    surfaceContainer = Color(0xFF11161B),
+    surfaceContainerHigh = Color(0xFF171D23),
+    surfaceContainerHighest = Color(0xFF1D252D),
     outline = Color(0xFF68727D),
     outlineVariant = Color(0xFF2C343D),
     error = Color(0xFFFFB4AB),
@@ -121,14 +126,9 @@ fun FlowChatTheme(
         AppAppearance.Light -> LightColors
     }
 
-    val density = LocalDensity.current
-    CompositionLocalProvider(
-        LocalDensity provides Density(density = density.density, fontScale = 1f)
-    ) {
-        MaterialTheme(
-            colorScheme = colors,
-            typography = FlowTypography,
-            content = content
-        )
-    }
+    MaterialTheme(
+        colorScheme = colors,
+        typography = FlowTypography,
+        content = content
+    )
 }

@@ -47,6 +47,27 @@ class ChatRepositoryTest {
     }
 
     @Test
+    fun persistsTextAttachmentAndUpdatesConversationTitle() = runTest {
+        val conversation = repository.createConversation(providerId = "p1", modelName = "gpt-test")
+
+        repository.appendMessage(
+            conversationId = conversation.id,
+            role = MessageRole.User,
+            content = "请总结",
+            status = MessageStatus.Sent,
+            modelName = "gpt-test",
+            attachmentName = "notes.txt",
+            attachmentText = "附件正文"
+        )
+        repository.updateConversationTitle(conversation.id, "请总结")
+
+        val savedMessage = repository.getMessages(conversation.id).single()
+        assertEquals("notes.txt", savedMessage.attachmentName)
+        assertEquals("附件正文", savedMessage.attachmentText)
+        assertEquals("请总结", repository.getConversation(conversation.id)?.title)
+    }
+
+    @Test
     fun marksAssistantMessageFailedForRetry() = runTest {
         val conversation = repository.createConversation(providerId = "p1", modelName = "gpt-4o-mini")
         val assistant = repository.appendMessage(

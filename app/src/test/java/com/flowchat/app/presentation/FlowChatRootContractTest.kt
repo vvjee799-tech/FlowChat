@@ -1,6 +1,7 @@
 package com.flowchat.app.presentation
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,7 +37,9 @@ class FlowChatRootContractTest {
         assertTrue(mainActivity.contains("AppAppearance.load(this)"))
         assertTrue(mainActivity.contains("AppAppearance.save(this, appearance)"))
         assertTrue(mainActivity.contains("FlowChatTheme(appAppearance = appAppearance)"))
-        assertTrue(mainActivity.contains("SplashTransition(appAppearance = appAppearance"))
+        assertTrue(mainActivity.contains("isAppearanceLightStatusBars = !useDarkSystemBars"))
+        assertTrue(mainActivity.contains("isAppearanceLightNavigationBars = !useDarkSystemBars"))
+        assertTrue(mainActivity.contains("SplashTransition(appAppearance = appAppearance)"))
         assertTrue(mainActivity.contains("FlowChatRoot(appAppearance = appAppearance, onAppAppearanceChange = { appearance ->"))
         assertTrue(source.contains("fun FlowChatRoot("))
         assertTrue(source.contains("appAppearance: AppAppearance"))
@@ -45,8 +48,8 @@ class FlowChatRootContractTest {
         assertTrue(source.contains("appAppearance = appAppearance"))
         assertTrue(source.contains("onAppAppearanceChange = onAppAppearanceChange"))
         assertTrue(themeSource.contains("fun FlowChatTheme("))
-        assertTrue(themeSource.contains("CompositionLocalProvider("))
-        assertTrue(themeSource.contains("LocalDensity provides Density(density = density.density, fontScale = 1f)"))
+        assertFalse(themeSource.contains("CompositionLocalProvider("))
+        assertFalse(themeSource.contains("fontScale = 1f"))
         assertTrue(themeSource.contains("appAppearance: AppAppearance"))
         assertTrue(themeSource.contains("AppAppearance.Dark -> DarkColors"))
         assertTrue(themeSource.contains("AppAppearance.Light -> LightColors"))

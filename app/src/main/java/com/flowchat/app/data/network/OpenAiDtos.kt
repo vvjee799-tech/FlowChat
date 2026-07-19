@@ -1,15 +1,15 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package com.flowchat.app.data.network
 
 import com.flowchat.app.domain.model.ChatRequest
 import com.flowchat.app.domain.model.ChatRequestMessage
 import com.flowchat.app.domain.model.ProviderConfig
 import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-@OptIn(ExperimentalSerializationApi::class)
 data class OpenAiChatCompletionRequest(
     val model: String,
     val messages: List<OpenAiChatMessage>,

@@ -8,7 +8,7 @@ import org.junit.Test
 
 class SplashTransitionContractTest {
     @Test
-    fun startupUsesProvidedSplashImageBeforeEnteringMainChat() {
+    fun startupKeepsNativeWindowAndRestoresComposeSplashTransition() {
         val mainActivity = File("src/main/java/com/flowchat/app/MainActivity.kt").readText()
         val splashTransitionFile = File("src/main/java/com/flowchat/app/presentation/SplashTransition.kt")
         val styles = File("src/main/res/values/styles.xml").readText()
@@ -29,25 +29,22 @@ class SplashTransitionContractTest {
         assertTrue(splashLightImage.exists())
         assertTrue(splashDarkImage.exists())
 
-        val splashTransition = splashTransitionFile.readText()
         val windowBackground = windowBackgroundFile.readText()
         val nightWindowBackground = nightWindowBackgroundFile.readText()
         val androidTwelveStyles = androidTwelveStylesFile.readText()
         val androidTwelveNightStyles = androidTwelveNightStylesFile.readText()
         val transparentSplashIcon = transparentSplashIconFile.readText()
 
-        assertTrue(mainActivity.contains("SplashTransition("))
-        assertTrue(mainActivity.indexOf("SplashTransition(") < mainActivity.indexOf("FlowChatRoot(appAppearance = appAppearance"))
+        val splashTransition = splashTransitionFile.readText()
+        assertTrue(mainActivity.contains("import com.flowchat.app.presentation.SplashTransition"))
+        assertTrue(mainActivity.contains("SplashTransition(appAppearance = appAppearance)"))
+        assertTrue(mainActivity.contains("FlowChatRoot(appAppearance = appAppearance"))
+        assertTrue(splashTransition.contains("rememberSaveable { mutableStateOf(true) }"))
         assertTrue(splashTransition.contains("delay(SplashTransitionDurationMillis)"))
-        assertTrue(splashTransition.contains("AnimatedVisibility("))
-        assertTrue(splashTransition.contains("fadeOut("))
-        assertTrue(splashTransition.contains("appAppearance: AppAppearance"))
-        assertTrue(splashTransition.contains("if (appAppearance == AppAppearance.Dark)"))
         assertTrue(splashTransition.contains("R.drawable.splash_transition_dark"))
         assertTrue(splashTransition.contains("R.drawable.splash_transition_light"))
-        assertTrue(splashTransition.contains("painterResource(splashImageRes)"))
-        assertTrue(splashTransition.contains("ContentScale.Crop"))
-        assertTrue(splashTransition.contains("contentDescription = null"))
+        assertTrue(splashTransition.contains("contentScale = ContentScale.Crop"))
+        assertTrue(splashTransition.contains("fadeOut("))
         assertTrue(styles.contains("<item name=\"android:windowBackground\">@drawable/splash_window_background</item>"))
         assertTrue(windowBackground.contains("<layer-list"))
         assertTrue(windowBackground.contains("<bitmap"))

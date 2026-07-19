@@ -23,9 +23,9 @@ object ChatRequestFactory {
             .filter { it.status != MessageStatus.Failed }
             .filter { it.status != MessageStatus.Stopped }
             .filter { it.role == MessageRole.User || it.role == MessageRole.Assistant }
-            .filter { it.content.isNotBlank() }
+            .filter { it.content.isNotBlank() || !it.attachmentText.isNullOrBlank() }
             .map { message ->
-                ChatRequestMessage(role = message.role.apiRole, content = message.content)
+                ChatRequestMessage(role = message.role.apiRole, content = message.content.withAttachment(message))
             }
             .takeRecentUserTurns(MaxHistoryUserTurns)
         val contextInsertIndex = conversationMessages.indexOfLast { it.role == MessageRole.User.apiRole }
@@ -111,6 +111,25 @@ object ChatRequestFactory {
         appendLine("<user-message>")
         appendLine(this@withLatestUserPrefix)
         append("</user-message>")
+    }
+
+    private fun String.withAttachment(message: Message): String {
+        val attachment = message.attachmentText?.trim().orEmpty()
+        if (attachment.isEmpty()) return this
+        val safeName = message.attachmentName.orEmpty()
+            .replace("&", "&amp;")
+            .replace("\"", "&quot;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        return buildString {
+            if (this@withAttachment.isNotBlank()) {
+                appendLine(this@withAttachment)
+                appendLine()
+            }
+            appendLine("<attached-file name=\"$safeName\">")
+            appendLine(attachment)
+            append("</attached-file>")
+        }
     }
 
     private fun List<ChatRequestMessage>.takeRecentUserTurns(maxTurns: Int): List<ChatRequestMessage> {

@@ -10,8 +10,10 @@ import com.flowchat.app.data.db.MIGRATION_1_2
 import com.flowchat.app.data.db.MIGRATION_2_3
 import com.flowchat.app.data.db.MIGRATION_3_4
 import com.flowchat.app.data.db.MIGRATION_4_5
+import com.flowchat.app.data.db.MIGRATION_5_6
 import com.flowchat.app.data.db.MessageDao
 import com.flowchat.app.data.db.ProviderDao
+import com.flowchat.app.data.device.ShizukuDeviceAssistantGateway
 import com.flowchat.app.data.network.ChatCompletionClient
 import com.flowchat.app.data.network.KtorOpenAiCompatibleClient
 import com.flowchat.app.data.network.KtorModelCatalogClient
@@ -32,6 +34,7 @@ import com.flowchat.app.domain.repository.MemoryRepository
 import com.flowchat.app.domain.repository.PromptProfileRepository
 import com.flowchat.app.domain.repository.ProviderRepository
 import com.flowchat.app.domain.repository.WebSearchSettingsRepository
+import com.flowchat.app.domain.device.DeviceAssistantGateway
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -74,7 +77,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): FlowChatDatabase =
         Room.databaseBuilder(context, FlowChatDatabase::class.java, "flowchat.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
     @Provides fun provideProviderDao(database: FlowChatDatabase): ProviderDao = database.providerDao()
@@ -88,6 +91,9 @@ abstract class BindingModule {
     @Binds abstract fun bindApiKeyStore(impl: KeystoreApiKeyStore): ApiKeyStore
     @Binds abstract fun bindAppUsageReader(impl: AndroidAppUsageReader): AppUsageReader
     @Binds abstract fun bindAppLauncher(impl: AndroidAppLauncher): AppLauncher
+    @Binds abstract fun bindDeviceAssistantGateway(
+        impl: ShizukuDeviceAssistantGateway
+    ): DeviceAssistantGateway
     @Binds abstract fun bindChatRepository(impl: RoomChatRepository): ChatRepository
     @Binds abstract fun bindMemoryRepository(impl: FileMemoryRepository): MemoryRepository
     @Binds abstract fun bindPromptProfileRepository(impl: FilePromptProfileRepository): PromptProfileRepository

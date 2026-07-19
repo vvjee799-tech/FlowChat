@@ -16,6 +16,7 @@ val releaseKeystoreProperties = Properties().apply {
     }
 }
 val hasReleaseSigning = releaseKeystorePropertiesFile.exists()
+val searchProxyUrl = providers.gradleProperty("flowchatSearchProxyUrl").orElse("").get()
 
 fun releaseSigningProperty(name: String): String =
     releaseKeystoreProperties.getProperty(name)
@@ -29,8 +30,10 @@ android {
         applicationId = "com.flowchat.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
+
+        buildConfigField("String", "SEARCH_PROXY_URL", "\"${searchProxyUrl.replace("\"", "\\\"")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -72,10 +75,17 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+    }
+
+    bundle {
+        language {
+            enableSplit = false
+        }
     }
 
     packaging {
@@ -120,6 +130,8 @@ dependencies {
     implementation(libs.ktor.serialization.json)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
