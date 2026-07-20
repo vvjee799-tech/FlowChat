@@ -63,7 +63,6 @@
     <string name="background_settings">背景设置</string>
     <string name="background_light">浅色</string>
     <string name="background_dark">深色</string>
-    <string name="life_tools_permissions">生活工具权限</string>
     <string name="app_usage_access">应用使用情况</string>
     <string name="permission_enabled">已开启</string>
     <string name="permission_open">去开启</string>
@@ -127,12 +126,12 @@
     <string name="thinking_done">&#24050;&#24605;&#32771;&#65288;&#29992;&#26102;%1$d&#31186;&#65289;</string>
     <string name="thinking_expand">&#23637;&#24320;</string>
     <string name="thinking_collapse">&#25240;&#21472;</string>
-    <string name="upload_file">&#19978;&#20256;&#25991;&#26412;&#25991;&#20214;</string>
+    <string name="upload_file">&#19978;&#20256;&#25991;&#20214;</string>
     <string name="remove_attachment">&#31227;&#38500;&#38468;&#20214;</string>
-    <string name="attachment_text_only">&#26242;&#26102;&#21482;&#25903;&#25345;&#25991;&#26412;&#25991;&#20214;&#12290;</string>
-    <string name="attachment_too_large">&#25991;&#20214;&#19981;&#33021;&#36229;&#36807; 256 KB&#12290;</string>
+    <string name="attachment_unsupported">&#26242;&#19981;&#25903;&#25345;&#35813;&#26684;&#24335;&#65292;&#35831;&#36873;&#25321; TXT&#12289;PDF&#12289;DOCX&#12289;XLSX&#12289;PPTX &#25110; OpenDocument &#25991;&#20214;&#12290;</string>
+    <string name="attachment_too_large">&#25991;&#20214;&#19981;&#33021;&#36229;&#36807; 20 MB&#12290;</string>
+    <string name="attachment_empty">&#25991;&#20214;&#20013;&#27809;&#26377;&#21487;&#35835;&#21462;&#30340;&#25991;&#23383;&#12290;</string>
     <string name="attachment_read_failed">&#26080;&#27861;&#35835;&#21462;&#35813;&#25991;&#20214;&#12290;</string>
-    <string name="life_tools_summary">&#36873;&#25321; AI &#21487;&#20197;&#35775;&#38382;&#25110;&#25171;&#24320;&#30340;&#20869;&#23481;</string>
     <string name="life_tools_privacy_note">&#26410;&#24320;&#21551;&#30340;&#24037;&#20855;&#19981;&#20250;&#21152;&#20837;&#27169;&#22411;&#35831;&#27714;&#12290;</string>
     <string name="app_usage_tool">&#24212;&#29992;&#20351;&#29992;&#25688;&#35201;</string>
     <string name="app_usage_tool_description">&#35835;&#21462;&#21508;&#24212;&#29992;&#30340;&#23631;&#24149;&#20351;&#29992;&#26102;&#38271;</string>
@@ -170,7 +169,10 @@
     <string name="open_navigation_drawer">&#25171;&#24320;&#20250;&#35805;&#25277;&#23625;</string>
     <string name="provider_configuration_invalid">&#35831;&#26816;&#26597;&#26381;&#21153;&#21830;&#22320;&#22336;&#12289;&#21517;&#31216;&#21644;&#27169;&#22411;&#12290;</string>
     <string name="device_assistant">设备助手</string>
-    <string name="device_assistant_summary">通过 Shizuku 与页面操作权限使用设备功能</string>
+    <string name="device_assistant_summary">Power 模式与 Shizuku 连接</string>
+    <string name="power_mode">Power 模式</string>
+    <string name="power_mode_description">一键拥有最高权限！</string>
+    <string name="shizuku_status">Shizuku 连接</string>
     <string name="device_assistant_enabled">启用设备助手</string>
     <string name="device_assistant_enabled_description">允许 AI 使用已授权的设备状态与页面操作工具</string>
     <string name="force_stop_tool">强制停止应用</string>
@@ -223,4 +225,20 @@
     <string name="force_stop_confirmation_title">强制停止 %1$s？</string>
     <string name="force_stop_confirmation_message">%1$s 中未保存的内容可能会丢失。</string>
     <string name="continue_action">继续</string>
+    <string name="floating_assistant">浮窗助手</string>
+    <string name="floating_assistant_description">切到其他应用后也能查看进度、继续对话和停止输出。</string>
+    <string name="floating_assistant_permission">允许显示在其他应用上层</string>
+    <string name="floating_assistant_permission_required">需要先授予悬浮窗权限，助手才能出现在 FlowChat 外。</string>
+    <string name="floating_assistant_running">FlowChat 浮窗助手已就绪</string>
+    <string name="floating_assistant_notification_description">在 FlowChat 协助使用其他应用时显示对话进度。</string>
+    <string name="floating_assistant_browsing_app">正在浏览 %1$s</string>
+    <string name="floating_assistant_working">正在后台处理</string>
+    <string name="floating_assistant_thinking">正在思考…</string>
+    <string name="floating_assistant_ready">我在这里，随时可以继续。</string>
+    <string name="floating_assistant_ready_short">随时可以继续</string>
+    <string name="floating_assistant_waiting">正在等待模型响应</string>
+    <string name="floating_assistant_using_tool">正在调用 %1$s</string>
+    <string name="floating_assistant_input_hint">继续告诉我…</string>
+    <string name="collapse_floating_assistant">收起浮窗助手</string>
+    <string name="open_flowchat">打开 FlowChat</string>
 </resources>

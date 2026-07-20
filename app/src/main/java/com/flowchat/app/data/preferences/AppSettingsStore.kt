@@ -12,11 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class AppSettings(
     val memoryEnabled: Boolean = true,
-    val appUsageToolEnabled: Boolean = false,
-    val recentAppActivityToolEnabled: Boolean = false,
-    val openAppToolEnabled: Boolean = true,
-    val deviceAssistantEnabled: Boolean = false,
-    val forceStopToolEnabled: Boolean = false,
+    val powerModeEnabled: Boolean = false,
     val webSearchDisclosureAccepted: Boolean = false,
     val installId: String = ""
 )
@@ -39,20 +35,8 @@ class AppSettingsStore private constructor(
 
     fun setMemoryEnabled(enabled: Boolean) = update(MemoryEnabledKey, enabled) { copy(memoryEnabled = enabled) }
 
-    fun setAppUsageToolEnabled(enabled: Boolean) =
-        update(AppUsageEnabledKey, enabled) { copy(appUsageToolEnabled = enabled) }
-
-    fun setRecentAppActivityToolEnabled(enabled: Boolean) =
-        update(RecentActivityEnabledKey, enabled) { copy(recentAppActivityToolEnabled = enabled) }
-
-    fun setOpenAppToolEnabled(enabled: Boolean) =
-        update(OpenAppEnabledKey, enabled) { copy(openAppToolEnabled = enabled) }
-
-    fun setDeviceAssistantEnabled(enabled: Boolean) =
-        update(DeviceAssistantEnabledKey, enabled) { copy(deviceAssistantEnabled = enabled) }
-
-    fun setForceStopToolEnabled(enabled: Boolean) =
-        update(ForceStopEnabledKey, enabled) { copy(forceStopToolEnabled = enabled) }
+    fun setPowerModeEnabled(enabled: Boolean) =
+        update(PowerModeEnabledKey, enabled) { copy(powerModeEnabled = enabled) }
 
     fun acceptWebSearchDisclosure() =
         update(WebSearchDisclosureKey, true) { copy(webSearchDisclosureAccepted = true) }
@@ -65,10 +49,12 @@ class AppSettingsStore private constructor(
     private companion object {
         const val PreferencesName = "app_controls"
         const val MemoryEnabledKey = "memory_enabled"
+        const val PowerModeEnabledKey = "power_mode_enabled"
         const val AppUsageEnabledKey = "app_usage_tool_enabled"
         const val RecentActivityEnabledKey = "recent_activity_tool_enabled"
         const val OpenAppEnabledKey = "open_app_tool_enabled"
         const val DeviceAssistantEnabledKey = "device_assistant_enabled"
+        const val FloatingAssistantEnabledKey = "floating_assistant_enabled"
         const val ForceStopEnabledKey = "force_stop_tool_enabled"
         const val WebSearchDisclosureKey = "web_search_disclosure_accepted"
         const val InstallIdKey = "install_id"
@@ -76,13 +62,20 @@ class AppSettingsStore private constructor(
         fun SharedPreferences.loadSettings(): AppSettings {
             val installId = getString(InstallIdKey, null)?.takeIf { it.isNotBlank() }
                 ?: UUID.randomUUID().toString().also { edit().putString(InstallIdKey, it).apply() }
+            val powerModeEnabled = if (contains(PowerModeEnabledKey)) {
+                getBoolean(PowerModeEnabledKey, false)
+            } else {
+                val migrated = getBoolean(AppUsageEnabledKey, false) ||
+                    getBoolean(RecentActivityEnabledKey, false) ||
+                    getBoolean(DeviceAssistantEnabledKey, false) ||
+                    getBoolean(FloatingAssistantEnabledKey, false) ||
+                    getBoolean(ForceStopEnabledKey, false)
+                edit().putBoolean(PowerModeEnabledKey, migrated).apply()
+                migrated
+            }
             return AppSettings(
                 memoryEnabled = getBoolean(MemoryEnabledKey, true),
-                appUsageToolEnabled = getBoolean(AppUsageEnabledKey, false),
-                recentAppActivityToolEnabled = getBoolean(RecentActivityEnabledKey, false),
-                openAppToolEnabled = getBoolean(OpenAppEnabledKey, true),
-                deviceAssistantEnabled = getBoolean(DeviceAssistantEnabledKey, false),
-                forceStopToolEnabled = getBoolean(ForceStopEnabledKey, false),
+                powerModeEnabled = powerModeEnabled,
                 webSearchDisclosureAccepted = getBoolean(WebSearchDisclosureKey, false),
                 installId = installId
             )

@@ -78,6 +78,7 @@ interface DeviceAssistantGateway {
     suspend fun setScreenBrightness(percent: Int): DeviceToolResult
     suspend fun setMediaVolume(percent: Int): DeviceToolResult
     suspend fun forceStopApp(appName: String): DeviceToolResult
+    suspend fun enablePowerMode(): DeviceToolResult
     suspend fun observeScreen(): DeviceToolResult = unsupportedAutomation()
     suspend fun tapUiElement(index: Int, longPress: Boolean = false): DeviceToolResult = unsupportedAutomation()
     suspend fun inputText(index: Int, text: String, clearExisting: Boolean): DeviceToolResult = unsupportedAutomation()
@@ -109,6 +110,7 @@ object UnavailableDeviceAssistantGateway : DeviceAssistantGateway {
     override suspend fun setScreenBrightness(percent: Int) = unavailable()
     override suspend fun setMediaVolume(percent: Int) = unavailable()
     override suspend fun forceStopApp(appName: String) = unavailable()
+    override suspend fun enablePowerMode() = unavailable()
     override suspend fun observeScreen() = unavailable()
     override suspend fun tapUiElement(index: Int, longPress: Boolean) = unavailable()
     override suspend fun inputText(index: Int, text: String, clearExisting: Boolean) = unavailable()

@@ -31,12 +31,29 @@ class ShizukuIntegrationContractTest {
         assertTrue(aidlSource.contains("String setScreenBrightness(int percent)"))
         assertTrue(aidlSource.contains("String setMediaVolume(int percent)"))
         assertTrue(aidlSource.contains("String forceStopPackage(String packageName)"))
+        assertTrue(aidlSource.contains("String enablePowerMode()"))
         assertTrue(gatewaySource.contains("Shizuku.UserServiceArgs"))
         assertTrue(gatewaySource.contains("Shizuku.bindUserService"))
+        assertTrue(gatewaySource.contains("hasLiveUserService()"))
+        assertTrue(gatewaySource.contains("probeConnectedService()"))
+        assertTrue(gatewaySource.contains("override suspend fun enablePowerMode()"))
         assertFalse(gatewaySource.contains("Shizuku.newProcess"))
         assertTrue(serviceSource.contains("runCommand(\"am\", \"get-current-user\")"))
+        assertTrue(serviceSource.contains("override fun enablePowerMode()"))
+        assertTrue(serviceSource.contains("GET_USAGE_STATS"))
+        assertTrue(serviceSource.contains("SYSTEM_ALERT_WINDOW"))
+        assertTrue(serviceSource.contains("enabled_accessibility_services"))
         assertFalse(serviceSource.contains("runCommand(\"am\", \"help\")"))
         assertFalse(toolDefinitions.contains("run_shell"))
         assertFalse(toolDefinitions.contains("execute_shell"))
+    }
+
+    @Test
+    fun activityRefreshesDeviceConnectionsWheneverItReturnsToForeground() {
+        val activity = File("src/main/java/com/flowchat/app/MainActivity.kt").readText()
+
+        assertTrue(activity.contains("lateinit var deviceAssistantGateway: DeviceAssistantGateway"))
+        assertTrue(activity.contains("deviceAssistantGateway.refreshConnection()"))
+        assertTrue(activity.contains("deviceAssistantGateway.refreshAccessibilityConnection()"))
     }
 }

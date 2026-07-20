@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.Settings
-import android.provider.OpenableColumns
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,10 +54,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
@@ -146,9 +145,10 @@ import com.flowchat.app.domain.model.Message
 import com.flowchat.app.domain.model.MessageRole
 import com.flowchat.app.domain.model.MessageStatus
 import com.flowchat.app.domain.model.ProviderConfig
-import com.flowchat.app.domain.device.DeviceCapability
-import com.flowchat.app.domain.device.AccessibilityConnectionState
-import com.flowchat.app.domain.device.AccessibilityConnectionStatus
+import com.flowchat.app.data.attachment.AttachmentDocumentParser
+import com.flowchat.app.data.attachment.AttachmentFileReader
+import com.flowchat.app.data.attachment.AttachmentReadException
+import com.flowchat.app.data.attachment.AttachmentReadFailure
 import com.flowchat.app.domain.device.ShizukuConnectionState
 import com.flowchat.app.domain.device.ShizukuConnectionStatus
 import com.flowchat.app.locale.AppLanguage
@@ -156,7 +156,6 @@ import com.flowchat.app.locale.AppLocale
 import com.flowchat.app.presentation.common.findActivity
 import com.flowchat.app.ui.theme.AppAppearance
 import java.io.File
-import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
@@ -166,17 +165,6 @@ import kotlinx.coroutines.withContext
 private val OriginalSettingsIcon = Icons.Default.Settings
 private val ComposerToolHeight = 34.dp
 private const val BottomMessageAnchorKey = "bottom-message-anchor"
-private const val MaxAttachmentBytes = 256 * 1024
-private val SupportedAttachmentMimeTypes = arrayOf(
-    "text/*",
-    "application/json",
-    "application/xml",
-    "application/javascript"
-)
-private val SupportedAttachmentExtensions = setOf(
-    "txt", "md", "markdown", "json", "xml", "csv", "tsv", "yaml", "yml",
-    "kt", "kts", "java", "js", "ts", "py", "html", "css", "toml", "ini", "log"
-)
 
 @Composable
 private fun DrawerMenuIcon(
@@ -227,14 +215,12 @@ fun ChatScreen(
             scope.launch {
                 runCatching {
                     withContext(Dispatchers.IO) {
-                        readTextAttachment(context, uri)
+                        AttachmentFileReader.read(context, uri)
                     }
                 }.onSuccess { attachment ->
                     viewModel.attachTextFile(attachment.name, attachment.text)
                 }.onFailure { error ->
-                    viewModel.reportError(
-                        error.message ?: context.getString(R.string.attachment_read_failed)
-                    )
+                    viewModel.reportError(attachmentErrorMessage(context, error))
                 }
             }
         }
@@ -427,7 +413,7 @@ fun ChatScreen(
                     onStop = viewModel::stop,
                     onToggleWebSearch = viewModel::toggleWebSearch,
                     onPickAttachment = {
-                        attachmentPicker.launch(SupportedAttachmentMimeTypes)
+                        attachmentPicker.launch(AttachmentDocumentParser.PickerMimeTypes)
                     },
                     onClearAttachment = viewModel::clearAttachment,
                     onSelectModel = viewModel::updateConversationModel
@@ -489,7 +475,6 @@ fun ChatScreen(
             appSettings = state.appSettings,
             memories = state.memories,
             shizukuState = state.shizukuState,
-            accessibilityState = state.accessibilityState,
             appAppearance = appAppearance,
             onAppAppearanceChange = onAppAppearanceChange,
             onOpenProviders = {
@@ -497,15 +482,9 @@ fun ChatScreen(
                 onOpenProviders()
             },
             onMemoryEnabledChange = viewModel::setMemoryEnabled,
-            onAppUsageToolEnabledChange = viewModel::setAppUsageToolEnabled,
-            onRecentAppActivityToolEnabledChange = viewModel::setRecentAppActivityToolEnabled,
-            onOpenAppToolEnabledChange = viewModel::setOpenAppToolEnabled,
-            onDeviceAssistantEnabledChange = viewModel::setDeviceAssistantEnabled,
-            onForceStopToolEnabledChange = viewModel::setForceStopToolEnabled,
+            onPowerModeEnabledChange = viewModel::setPowerModeEnabled,
             onRequestShizukuPermission = viewModel::requestShizukuPermission,
             onRefreshShizuku = viewModel::refreshShizukuConnection,
-            onOpenAccessibilitySettings = viewModel::openAccessibilitySettings,
-            onRefreshAccessibility = viewModel::refreshAccessibilityConnection,
             onDeleteMemory = viewModel::deleteMemory,
             onClearMemories = viewModel::clearMemories,
             onDismiss = { showAppSettings = false }
@@ -599,10 +578,18 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val lastMessage = messages.lastOrNull()
+    var lastAnimatedMessageId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(messages.size, lastMessage?.id, lastMessage?.content, lastMessage?.reasoningContent) {
+    LaunchedEffect(messages.size, lastMessage?.id) {
         if (messages.isNotEmpty()) {
+            lastAnimatedMessageId = lastMessage?.id
             listState.animateScrollToItem(messages.size)
+        }
+    }
+
+    LaunchedEffect(lastMessage?.content, lastMessage?.reasoningContent) {
+        if (messages.isNotEmpty() && lastAnimatedMessageId == lastMessage?.id) {
+            listState.scrollToItem(messages.size)
         }
     }
 
@@ -905,20 +892,13 @@ private fun AppSettingsSheet(
     appSettings: AppSettings,
     memories: List<MemoryRecord>,
     shizukuState: ShizukuConnectionState,
-    accessibilityState: AccessibilityConnectionState,
     appAppearance: AppAppearance,
     onAppAppearanceChange: (AppAppearance) -> Unit,
     onOpenProviders: () -> Unit,
     onMemoryEnabledChange: (Boolean) -> Unit,
-    onAppUsageToolEnabledChange: (Boolean) -> Unit,
-    onRecentAppActivityToolEnabledChange: (Boolean) -> Unit,
-    onOpenAppToolEnabledChange: (Boolean) -> Unit,
-    onDeviceAssistantEnabledChange: (Boolean) -> Unit,
-    onForceStopToolEnabledChange: (Boolean) -> Unit,
+    onPowerModeEnabledChange: (Boolean) -> Unit,
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
-    onRefreshAccessibility: () -> Unit,
     onDeleteMemory: (String) -> Unit,
     onClearMemories: () -> Unit,
     onDismiss: () -> Unit
@@ -928,7 +908,6 @@ private fun AppSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
-    var showLifeToolsDialog by remember { mutableStateOf(false) }
     var showDeviceAssistantDialog by remember { mutableStateOf(false) }
     var showMemoryDialog by remember { mutableStateOf(false) }
     ModalBottomSheet(
@@ -977,24 +956,12 @@ private fun AppSettingsSheet(
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
                     SettingsRow(
-                        title = stringResource(R.string.life_tools_permissions),
-                        icon = Icons.Default.Security,
-                        supportingText = stringResource(R.string.life_tools_summary),
-                        onClick = { showLifeToolsDialog = true }
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
-                    SettingsRow(
                         title = stringResource(R.string.device_assistant),
                         icon = Icons.Default.PhoneAndroid,
                         supportingText = stringResource(R.string.device_assistant_summary),
-                        trailingText = if (accessibilityState.isConnected) {
-                            accessibilityStatusLabel(accessibilityState.status)
-                        } else {
-                            shizukuStatusLabel(shizukuState.status)
-                        },
+                        trailingText = shizukuStatusLabel(shizukuState.status),
                         onClick = {
                             onRefreshShizuku()
-                            onRefreshAccessibility()
                             showDeviceAssistantDialog = true
                         }
                     )
@@ -1050,26 +1017,13 @@ private fun AppSettingsSheet(
             onDismiss = { showLanguageDialog = false }
         )
     }
-    if (showLifeToolsDialog) {
-        LifeToolsDialog(
-            appSettings = appSettings,
-            onAppUsageToolEnabledChange = onAppUsageToolEnabledChange,
-            onRecentAppActivityToolEnabledChange = onRecentAppActivityToolEnabledChange,
-            onOpenAppToolEnabledChange = onOpenAppToolEnabledChange,
-            onDismiss = { showLifeToolsDialog = false }
-        )
-    }
     if (showDeviceAssistantDialog) {
         DeviceAssistantDialog(
             appSettings = appSettings,
             shizukuState = shizukuState,
-            accessibilityState = accessibilityState,
-            onDeviceAssistantEnabledChange = onDeviceAssistantEnabledChange,
-            onForceStopToolEnabledChange = onForceStopToolEnabledChange,
+            onPowerModeEnabledChange = onPowerModeEnabledChange,
             onRequestShizukuPermission = onRequestShizukuPermission,
             onRefreshShizuku = onRefreshShizuku,
-            onOpenAccessibilitySettings = onOpenAccessibilitySettings,
-            onRefreshAccessibility = onRefreshAccessibility,
             onOpenShizuku = {
                 runCatching {
                     context.startActivity(
@@ -1096,17 +1050,19 @@ private fun AppSettingsSheet(
 private fun DeviceAssistantDialog(
     appSettings: AppSettings,
     shizukuState: ShizukuConnectionState,
-    accessibilityState: AccessibilityConnectionState,
-    onDeviceAssistantEnabledChange: (Boolean) -> Unit,
-    onForceStopToolEnabledChange: (Boolean) -> Unit,
+    onPowerModeEnabledChange: (Boolean) -> Unit,
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
-    onRefreshAccessibility: () -> Unit,
     onOpenShizuku: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
+    LaunchedEffect(Unit) { onRefreshShizuku() }
+    val statusAction = when (shizukuState.status) {
+        ShizukuConnectionStatus.NotInstalled -> onOpenShizuku
+        ShizukuConnectionStatus.PermissionRequired,
+        ShizukuConnectionStatus.PermissionDenied -> onRequestShizukuPermission
+        else -> onRefreshShizuku
+    }
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1118,147 +1074,98 @@ private fun DeviceAssistantDialog(
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 640.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.device_assistant),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
-                )
-                Row(
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Box(
+                    Text(
+                        text = stringResource(R.string.device_assistant),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                    )
+                    Row(
                         modifier = Modifier
-                            .size(9.dp)
+                            .fillMaxWidth()
                             .background(
-                                color = if (shizukuState.isConnected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.68f),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .padding(horizontal = 16.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.power_mode),
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = stringResource(R.string.power_mode_description),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = appSettings.powerModeEnabled,
+                            onCheckedChange = onPowerModeEnabledChange
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .clickable(onClick = statusAction)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(
+                                    color = if (shizukuState.isConnected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                                 },
                                 shape = CircleShape
                             )
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.shizuku_status),
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = shizukuState.detail
+                                    ?: shizukuStatusDescription(shizukuState.status),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Text(
                             text = shizukuStatusLabel(shizukuState.status),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = shizukuState.detail ?: shizukuStatusDescription(shizukuState.status),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    when (shizukuState.status) {
-                        ShizukuConnectionStatus.NotInstalled -> TextButton(onClick = onOpenShizuku) {
-                            Text(stringResource(R.string.install_shizuku))
-                        }
-                        ShizukuConnectionStatus.PermissionRequired,
-                        ShizukuConnectionStatus.PermissionDenied -> TextButton(onClick = onRequestShizukuPermission) {
-                            Text(stringResource(R.string.shizuku_permission))
-                        }
-                        else -> TextButton(onClick = onRefreshShizuku) {
-                            Text(stringResource(R.string.refresh))
-                        }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
-                Row(
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .background(
-                                color = if (accessibilityState.isConnected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                                },
-                                shape = CircleShape
-                            )
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.accessibility_screen_control),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            text = accessibilityState.detail
-                                ?: accessibilityStatusDescription(accessibilityState.status),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (shizukuState.isConnected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    if (accessibilityState.isConnected) {
-                        TextButton(onClick = onRefreshAccessibility) {
-                            Text(stringResource(R.string.refresh))
-                        }
-                    } else {
-                        TextButton(onClick = onOpenAccessibilitySettings) {
-                            Text(stringResource(R.string.enable_accessibility_service))
-                        }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f))
-                SettingsToggleRow(
-                    title = stringResource(R.string.device_assistant_enabled),
-                    supportingText = stringResource(R.string.device_assistant_enabled_description),
-                    checked = appSettings.deviceAssistantEnabled,
-                    enabled = shizukuState.isConnected || accessibilityState.isConnected,
-                    onCheckedChange = onDeviceAssistantEnabledChange
-                )
-                SettingsToggleRow(
-                    title = stringResource(R.string.force_stop_tool),
-                    supportingText = stringResource(R.string.force_stop_tool_description),
-                    checked = appSettings.forceStopToolEnabled,
-                    enabled = shizukuState.isConnected &&
-                        DeviceCapability.ForceStopApp in shizukuState.capabilities,
-                    onCheckedChange = onForceStopToolEnabledChange
-                )
-                Text(
-                    text = stringResource(R.string.available_capabilities),
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(start = 4.dp, top = 6.dp)
-                )
-                Text(
-                    text = if (shizukuState.capabilities.isEmpty()) {
-                        stringResource(R.string.no_available_capabilities)
-                    } else {
-                        shizukuState.capabilities.joinToString(" / ") { capability ->
-                            context.getString(capability.labelRes())
-                        }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
-                    Text(stringResource(R.string.done))
                 }
             }
-        }
     }
 }
 
@@ -1314,102 +1221,6 @@ private fun shizukuStatusDescription(status: ShizukuConnectionStatus): String = 
         ShizukuConnectionStatus.Error -> R.string.shizuku_error_description
     }
 )
-
-@Composable
-private fun accessibilityStatusLabel(status: AccessibilityConnectionStatus): String = stringResource(
-    when (status) {
-        AccessibilityConnectionStatus.Disabled -> R.string.accessibility_disabled
-        AccessibilityConnectionStatus.Connected -> R.string.accessibility_connected
-        AccessibilityConnectionStatus.Unavailable -> R.string.accessibility_unavailable
-        AccessibilityConnectionStatus.Error -> R.string.accessibility_error
-    }
-)
-
-@Composable
-private fun accessibilityStatusDescription(status: AccessibilityConnectionStatus): String = stringResource(
-    when (status) {
-        AccessibilityConnectionStatus.Disabled -> R.string.accessibility_disabled_description
-        AccessibilityConnectionStatus.Connected -> R.string.accessibility_connected_description
-        AccessibilityConnectionStatus.Unavailable -> R.string.accessibility_unavailable_description
-        AccessibilityConnectionStatus.Error -> R.string.accessibility_error_description
-    }
-)
-
-private fun DeviceCapability.labelRes(): Int =
-    when (this) {
-        DeviceCapability.DeviceStatus -> R.string.capability_device_status
-        DeviceCapability.ForegroundApp -> R.string.capability_foreground_app
-        DeviceCapability.ScreenBrightness -> R.string.capability_screen_brightness
-        DeviceCapability.MediaVolume -> R.string.capability_media_volume
-        DeviceCapability.ForceStopApp -> R.string.capability_force_stop_app
-        DeviceCapability.ScreenObservation -> R.string.capability_screen_observation
-        DeviceCapability.UiElementAction -> R.string.capability_ui_actions
-        DeviceCapability.TextInput -> R.string.capability_text_input
-        DeviceCapability.ScreenSwipe -> R.string.capability_screen_swipe
-        DeviceCapability.Navigation -> R.string.capability_navigation
-    }
-
-@Composable
-private fun LifeToolsDialog(
-    appSettings: AppSettings,
-    onAppUsageToolEnabledChange: (Boolean) -> Unit,
-    onRecentAppActivityToolEnabledChange: (Boolean) -> Unit,
-    onOpenAppToolEnabledChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.life_tools_permissions),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
-                )
-                Text(
-                    text = stringResource(R.string.life_tools_privacy_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                )
-                SettingsToggleRow(
-                    title = stringResource(R.string.app_usage_tool),
-                    supportingText = stringResource(R.string.app_usage_tool_description),
-                    checked = appSettings.appUsageToolEnabled,
-                    onCheckedChange = onAppUsageToolEnabledChange
-                )
-                SettingsToggleRow(
-                    title = stringResource(R.string.recent_app_activity_tool),
-                    supportingText = stringResource(R.string.recent_app_activity_tool_description),
-                    checked = appSettings.recentAppActivityToolEnabled,
-                    onCheckedChange = onRecentAppActivityToolEnabledChange
-                )
-                SettingsToggleRow(
-                    title = stringResource(R.string.open_app_tool),
-                    supportingText = stringResource(R.string.open_app_tool_description),
-                    checked = appSettings.openAppToolEnabled,
-                    onCheckedChange = onOpenAppToolEnabledChange
-                )
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text(stringResource(R.string.done))
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun SettingsToggleRow(
@@ -2222,35 +2033,13 @@ private fun ReasoningBubble(message: Message, maxWidth: Dp) {
 private fun formatMessageTime(context: Context, timestampMillis: Long): String =
     android.text.format.DateFormat.getTimeFormat(context).format(Date(timestampMillis))
 
-private fun readTextAttachment(context: Context, uri: Uri): PendingAttachment {
-    val resolver = context.contentResolver
-    val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    }?.takeIf { it.isNotBlank() } ?: "attachment.txt"
-    val mimeType = resolver.getType(uri).orEmpty().lowercase()
-    val extension = name.substringAfterLast('.', missingDelimiterValue = "").lowercase()
-    val supported = mimeType.startsWith("text/") ||
-        mimeType in SupportedAttachmentMimeTypes ||
-        extension in SupportedAttachmentExtensions
-    require(supported) { context.getString(R.string.attachment_text_only) }
-
-    val output = ByteArrayOutputStream()
-    val buffer = ByteArray(8 * 1024)
-    resolver.openInputStream(uri)?.use { input ->
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            require(output.size() + count <= MaxAttachmentBytes) {
-                context.getString(R.string.attachment_too_large)
-            }
-            output.write(buffer, 0, count)
-        }
-    } ?: error(context.getString(R.string.attachment_read_failed))
-
-    val text = output.toByteArray().toString(Charsets.UTF_8)
-    require(!text.contains('\u0000')) { context.getString(R.string.attachment_text_only) }
-    return PendingAttachment(name = name, text = text)
-}
+private fun attachmentErrorMessage(context: Context, error: Throwable): String =
+    when ((error as? AttachmentReadException)?.failure) {
+        AttachmentReadFailure.UnsupportedType -> context.getString(R.string.attachment_unsupported)
+        AttachmentReadFailure.TooLarge -> context.getString(R.string.attachment_too_large)
+        AttachmentReadFailure.EmptyContent -> context.getString(R.string.attachment_empty)
+        AttachmentReadFailure.ReadFailed, null -> context.getString(R.string.attachment_read_failed)
+    }
 
 @Composable
 private fun StreamingJumpingDots(modifier: Modifier = Modifier) {

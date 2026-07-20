@@ -120,6 +120,49 @@ class FlowChatShizukuService : IFlowChatShizukuService.Stub {
         }
     }
 
+    override fun enablePowerMode(): String {
+        val usageAccess = runCommand(
+            "cmd", "appops", "set", FlowChatPackageName, "GET_USAGE_STATS", "allow"
+        )
+        val overlayAccess = runCommand(
+            "cmd", "appops", "set", FlowChatPackageName, "SYSTEM_ALERT_WINDOW", "allow"
+        )
+        val enabledServices = runCommand(
+            "settings", "get", "secure", "enabled_accessibility_services"
+        ).output
+            .takeUnless { it == "null" }
+            .orEmpty()
+            .split(':')
+            .filter { it.isNotBlank() }
+            .toMutableSet()
+            .apply { add(FlowChatAccessibilityServiceName) }
+            .joinToString(":")
+        val accessibilityService = runCommand(
+            "settings",
+            "put",
+            "secure",
+            "enabled_accessibility_services",
+            enabledServices
+        )
+        val accessibilityMaster = runCommand(
+            "settings", "put", "secure", "accessibility_enabled", "1"
+        )
+        val failures = buildList {
+            if (!usageAccess.success) add("usage access")
+            if (!overlayAccess.success) add("floating window")
+            if (!accessibilityService.success || !accessibilityMaster.success) add("page control")
+        }
+        return if (failures.isEmpty()) {
+            response(true, "Power mode permissions are enabled.")
+        } else {
+            response(
+                false,
+                "Power mode could not enable: ${failures.joinToString()}.",
+                errorCode = "power_mode_partial_failure"
+            )
+        }
+    }
+
     private fun currentBrightness(): Int? =
         runCommand("settings", "get", "system", "screen_brightness")
             .takeIf { it.success }
@@ -184,6 +227,8 @@ class FlowChatShizukuService : IFlowChatShizukuService.Stub {
 
     private companion object {
         const val FlowChatPackageName = "com.flowchat.app"
+        const val FlowChatAccessibilityServiceName =
+            "$FlowChatPackageName/com.flowchat.app.data.device.FlowChatAccessibilityService"
         const val CommandTimeoutSeconds = 5L
         val PackageNamePattern = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
     }

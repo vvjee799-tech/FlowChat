@@ -8,4 +8,5 @@ interface IFlowChatShizukuService {
     String setScreenBrightness(int percent) = 4;
     String setMediaVolume(int percent) = 5;
     String forceStopPackage(String packageName) = 6;
+    String enablePowerMode() = 7;
 }

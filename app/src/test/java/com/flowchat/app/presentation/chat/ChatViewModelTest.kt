@@ -384,8 +384,7 @@ class ChatViewModelTest {
             memoryRepository = FakeMemoryRepository(),
             appSettingsStore = AppSettingsStore(
                 AppSettings(
-                    deviceAssistantEnabled = true,
-                    forceStopToolEnabled = true,
+                    powerModeEnabled = true,
                     installId = "test-install"
                 )
             )
@@ -455,8 +454,7 @@ class ChatViewModelTest {
             memoryRepository = FakeMemoryRepository(),
             appSettingsStore = AppSettingsStore(
                 AppSettings(
-                    deviceAssistantEnabled = true,
-                    forceStopToolEnabled = true,
+                    powerModeEnabled = true,
                     installId = "test-install"
                 )
             )
@@ -507,9 +505,7 @@ class ChatViewModelTest {
             appSettingsStore = AppSettingsStore(
                 AppSettings(
                     memoryEnabled = false,
-                    appUsageToolEnabled = false,
-                    recentAppActivityToolEnabled = false,
-                    openAppToolEnabled = false,
+                    powerModeEnabled = false,
                     installId = "test-install"
                 )
             )
@@ -560,7 +556,7 @@ class ChatViewModelTest {
             promptProfileRepository = FakePromptProfileRepository(),
             memoryRepository = FakeMemoryRepository(),
             appSettingsStore = AppSettingsStore(
-                AppSettings(deviceAssistantEnabled = true, installId = "test-install")
+                AppSettings(powerModeEnabled = true, installId = "test-install")
             )
         )
         val collection = backgroundScope.launch { viewModel.uiState.collect {} }
@@ -575,6 +571,119 @@ class ChatViewModelTest {
         assertEquals(listOf(2), deviceGateway.tappedIndexes)
         assertEquals(1, deviceGateway.backCount)
         assertTrue(chatClient.requests.first().tools.any { it.name == AgentToolDefinitions.ObserveScreenToolName })
+        collection.cancel()
+    }
+
+    @Test
+    fun uiAutomationAllowsRepeatedObservationAfterInterveningActions() = runTest(dispatcher) {
+        val provider = ProviderConfig(
+            id = "provider-1",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-pro"
+        )
+        val conversation = Conversation(
+            id = "conversation-1",
+            title = "Repeated observation",
+            providerId = provider.id,
+            modelName = provider.defaultModel
+        )
+        val scriptedResponses = listOf(
+            listOf(ChatDelta.ToolCalls(listOf(ChatToolCall("observe-1", AgentToolDefinitions.ObserveScreenToolName, "{}")))),
+            listOf(ChatDelta.ToolCalls(listOf(ChatToolCall("tap-1", AgentToolDefinitions.TapUiElementToolName, "{\"index\":1}")))),
+            listOf(ChatDelta.ToolCalls(listOf(ChatToolCall("observe-2", AgentToolDefinitions.ObserveScreenToolName, "{}")))),
+            listOf(ChatDelta.ToolCalls(listOf(ChatToolCall("tap-2", AgentToolDefinitions.TapUiElementToolName, "{\"index\":2}")))),
+            listOf(ChatDelta.ToolCalls(listOf(ChatToolCall("observe-3", AgentToolDefinitions.ObserveScreenToolName, "{}")))),
+            listOf(ChatDelta.Content("Task complete."), ChatDelta.Done)
+        )
+        val chatClient = FakeChatCompletionClient(scriptedResponses)
+        val deviceGateway = FakeDeviceAssistantGateway()
+        val viewModel = ChatViewModel(
+            chatRepository = FakeChatRepository(listOf(conversation), conversation),
+            providerRepository = FakeProviderRepository(provider),
+            chatClient = chatClient,
+            webSearchClient = FakeWebSearchClient(),
+            webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
+            appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
+            deviceAssistantGateway = deviceGateway,
+            promptProfileRepository = FakePromptProfileRepository(),
+            memoryRepository = FakeMemoryRepository(),
+            appSettingsStore = AppSettingsStore(
+                AppSettings(powerModeEnabled = true, installId = "test-install")
+            )
+        )
+        val collection = backgroundScope.launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.updateInput("Complete a multi-screen task")
+        viewModel.send()
+        advanceUntilIdle()
+
+        assertEquals(3, deviceGateway.observeCount)
+        assertEquals(listOf(1, 2), deviceGateway.tappedIndexes)
+        assertEquals(6, chatClient.requests.size)
+        collection.cancel()
+    }
+
+    @Test
+    fun uiAutomationSupportsLongTasksBeyondEightToolRounds() = runTest(dispatcher) {
+        val provider = ProviderConfig(
+            id = "provider-1",
+            displayName = "DeepSeek",
+            baseUrl = "https://api.deepseek.com",
+            defaultModel = "deepseek-v4-pro"
+        )
+        val conversation = Conversation(
+            id = "conversation-1",
+            title = "Long device task",
+            providerId = provider.id,
+            modelName = provider.defaultModel
+        )
+        val toolResponses = (0 until 10).map { index ->
+            listOf(
+                ChatDelta.ToolCalls(
+                    listOf(
+                        ChatToolCall(
+                            id = "tap-$index",
+                            name = AgentToolDefinitions.TapUiElementToolName,
+                            arguments = "{\"index\":$index}"
+                        )
+                    )
+                )
+            )
+        }
+        val chatClient = FakeChatCompletionClient(
+            scriptedResponses = toolResponses + listOf(
+                listOf(ChatDelta.Content("Long task complete."), ChatDelta.Done)
+            )
+        )
+        val deviceGateway = FakeDeviceAssistantGateway()
+        val viewModel = ChatViewModel(
+            chatRepository = FakeChatRepository(listOf(conversation), conversation),
+            providerRepository = FakeProviderRepository(provider),
+            chatClient = chatClient,
+            webSearchClient = FakeWebSearchClient(),
+            webSearchSettingsRepository = FakeWebSearchSettingsRepository(),
+            appUsageReader = FakeAppUsageReader(),
+            appLauncher = FakeAppLauncher(),
+            deviceAssistantGateway = deviceGateway,
+            promptProfileRepository = FakePromptProfileRepository(),
+            memoryRepository = FakeMemoryRepository(),
+            appSettingsStore = AppSettingsStore(
+                AppSettings(powerModeEnabled = true, installId = "test-install")
+            )
+        )
+        val collection = backgroundScope.launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.updateInput("Complete a long sequence of screen actions")
+        viewModel.send()
+        advanceUntilIdle()
+
+        assertEquals(11, chatClient.requests.size)
+        assertEquals((0 until 10).toList(), deviceGateway.tappedIndexes)
+        assertFalse(viewModel.uiState.value.errorMessage == "Tool call limit reached.")
         collection.cancel()
     }
 
@@ -861,6 +970,7 @@ class ChatViewModelTest {
         override suspend fun getForegroundApp() = DeviceToolResult(true, "foreground_package=test")
         override suspend fun setScreenBrightness(percent: Int) = DeviceToolResult(true, "brightness=$percent")
         override suspend fun setMediaVolume(percent: Int) = DeviceToolResult(true, "volume=$percent")
+        override suspend fun enablePowerMode() = DeviceToolResult(true, "power mode")
         override suspend fun forceStopApp(appName: String): DeviceToolResult {
             forceStoppedApps += appName
             return DeviceToolResult(true, "stopped $appName")

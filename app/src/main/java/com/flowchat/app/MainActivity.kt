@@ -13,15 +13,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.flowchat.app.data.preferences.AppSettingsStore
+import com.flowchat.app.domain.device.DeviceAssistantGateway
 import com.flowchat.app.locale.AppLocale
 import com.flowchat.app.presentation.FlowChatRoot
 import com.flowchat.app.presentation.SplashTransition
+import com.flowchat.app.presentation.overlay.FloatingAssistantManager
 import com.flowchat.app.ui.theme.AppAppearance
 import com.flowchat.app.ui.theme.FlowChatTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var appSettingsStore: AppSettingsStore
+    @Inject lateinit var floatingAssistantManager: FloatingAssistantManager
+    @Inject lateinit var deviceAssistantGateway: DeviceAssistantGateway
+
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(AppLocale.wrapContext(newBase))
     }
@@ -30,6 +44,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         enableEdgeToEdge()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                appSettingsStore.state
+                    .map { settings -> settings.powerModeEnabled }
+                    .distinctUntilChanged()
+                    .collect { floatingAssistantManager.syncEnabled() }
+            }
+        }
         setContent {
             var appAppearance by remember { mutableStateOf(AppAppearance.load(this)) }
             val systemDark = isSystemInDarkTheme()
@@ -53,5 +75,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        floatingAssistantManager.onAppForeground()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        deviceAssistantGateway.refreshConnection()
+        deviceAssistantGateway.refreshAccessibilityConnection()
+        floatingAssistantManager.onAppForeground()
+    }
+
+    override fun onStop() {
+        floatingAssistantManager.onAppBackground()
+        super.onStop()
     }
 }

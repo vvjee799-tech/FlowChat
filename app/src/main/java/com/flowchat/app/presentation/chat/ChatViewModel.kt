@@ -33,6 +33,9 @@ import com.flowchat.app.domain.repository.WebSearchSettingsRepository
 import com.flowchat.app.domain.tools.AgentToolDefinitions
 import com.flowchat.app.domain.validation.ProviderConfigValidator
 import com.flowchat.app.domain.websearch.WebSearchContextFormatter
+import com.flowchat.app.presentation.overlay.FloatingAssistantBridge
+import com.flowchat.app.presentation.overlay.FloatingAssistantCommand
+import com.flowchat.app.presentation.overlay.FloatingAssistantState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -44,8 +47,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -69,12 +74,11 @@ class ChatViewModel @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val appSettingsStore: AppSettingsStore = AppSettingsStore(
         AppSettings(
-            appUsageToolEnabled = true,
-            recentAppActivityToolEnabled = true,
-            openAppToolEnabled = true,
+            powerModeEnabled = true,
             installId = "test"
         )
-    )
+    ),
+    private val floatingAssistantBridge: FloatingAssistantBridge = FloatingAssistantBridge()
 ) : ViewModel() {
     private val currentConversationId = MutableStateFlow<String?>(null)
     private val input = MutableStateFlow("")
@@ -197,7 +201,36 @@ class ChatViewModel @Inject constructor(
             providerRepository.ensureTemplates()
         }
         deviceAssistantGateway.refreshConnection()
+        viewModelScope.launch {
+            combine(
+                appSettingsStore.state.map { settings -> settings.powerModeEnabled },
+                deviceAssistantGateway.connectionState.map { state -> state.status }
+            ) { enabled, status -> enabled to status }
+                .distinctUntilChanged()
+                .collect { (enabled, status) ->
+                    if (enabled && status in ConnectedShizukuStatuses) {
+                        val result = deviceAssistantGateway.enablePowerMode()
+                        if (!result.success) errorMessage.value = result.summary
+                    }
+                }
+        }
         refreshMemories()
+        viewModelScope.launch {
+            uiState.collect { state ->
+                floatingAssistantBridge.publish(FloatingAssistantState.from(state))
+            }
+        }
+        viewModelScope.launch {
+            floatingAssistantBridge.commands.collect { command ->
+                when (command) {
+                    is FloatingAssistantCommand.Send -> {
+                        updateInput(command.text)
+                        send()
+                    }
+                    FloatingAssistantCommand.Stop -> stop()
+                }
+            }
+        }
     }
 
     fun updateInput(value: String) {
@@ -237,24 +270,14 @@ class ChatViewModel @Inject constructor(
         appSettingsStore.setMemoryEnabled(enabled)
     }
 
-    fun setAppUsageToolEnabled(enabled: Boolean) {
-        appSettingsStore.setAppUsageToolEnabled(enabled)
-    }
-
-    fun setRecentAppActivityToolEnabled(enabled: Boolean) {
-        appSettingsStore.setRecentAppActivityToolEnabled(enabled)
-    }
-
-    fun setOpenAppToolEnabled(enabled: Boolean) {
-        appSettingsStore.setOpenAppToolEnabled(enabled)
-    }
-
-    fun setDeviceAssistantEnabled(enabled: Boolean) {
-        appSettingsStore.setDeviceAssistantEnabled(enabled)
-    }
-
-    fun setForceStopToolEnabled(enabled: Boolean) {
-        appSettingsStore.setForceStopToolEnabled(enabled)
+    fun setPowerModeEnabled(enabled: Boolean) {
+        appSettingsStore.setPowerModeEnabled(enabled)
+        if (enabled) {
+            refreshDeviceAssistantConnections()
+            if (deviceAssistantGateway.connectionState.value.status in PermissionRequestShizukuStatuses) {
+                deviceAssistantGateway.requestPermission()
+            }
+        }
     }
 
     fun requestShizukuPermission() {
@@ -266,6 +289,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun refreshAccessibilityConnection() {
+        deviceAssistantGateway.refreshAccessibilityConnection()
+    }
+
+    fun refreshDeviceAssistantConnections() {
+        deviceAssistantGateway.refreshConnection()
         deviceAssistantGateway.refreshAccessibilityConnection()
     }
 
@@ -460,13 +488,13 @@ class ChatViewModel @Inject constructor(
             request = AgentToolDefinitions.withLifestyleTools(
                 request,
                 includeWebSearch = webSearchEnabled.value,
-                includeAppUsage = settings.appUsageToolEnabled,
-                includeRecentActivity = settings.recentAppActivityToolEnabled,
-                includeOpenApp = settings.openAppToolEnabled,
-                includeDeviceAssistant = settings.deviceAssistantEnabled &&
+                includeAppUsage = settings.powerModeEnabled,
+                includeRecentActivity = settings.powerModeEnabled,
+                includeOpenApp = settings.powerModeEnabled,
+                includeDeviceAssistant = settings.powerModeEnabled &&
                     (deviceAssistantGateway.connectionState.value.isConnected ||
                         deviceAssistantGateway.accessibilityState.value.isConnected),
-                includeForceStop = settings.forceStopToolEnabled,
+                includeForceStop = settings.powerModeEnabled,
                 deviceCapabilities = deviceAssistantGateway.connectionState.value.capabilities
             )
             val apiKey = providerRepository.getApiKey(provider)
@@ -474,7 +502,8 @@ class ChatViewModel @Inject constructor(
             var reasoningContent = ""
             runCatching {
                 var toolRounds = 0
-                val toolCallCounts = mutableMapOf<String, Int>()
+                var toolRoundLimit = MaxToolCallRounds
+                val toolCallLoopGuard = ToolCallLoopGuard(MaxConsecutiveIdenticalToolCalls)
                 while (true) {
                     val response = collectAssistantResponse(
                         request = request,
@@ -509,7 +538,10 @@ class ChatViewModel @Inject constructor(
                         }
                         return@runCatching
                     }
-                    if (toolRounds >= MaxToolCallRounds) {
+                    if (response.toolCalls.any { it.name in UiAutomationToolNames }) {
+                        toolRoundLimit = MaxUiAutomationToolCallRounds
+                    }
+                    if (toolRounds >= toolRoundLimit) {
                         val message = "Tool call limit reached."
                         chatRepository.markMessageFailed(assistant.id, message)
                         saveMemoryIfEnabled(activeProfile, text, message)
@@ -527,7 +559,7 @@ class ChatViewModel @Inject constructor(
                         modelName = conversation.modelName,
                         tavilyApiKey = tavilyApiKey,
                         installId = appSettingsStore.state.value.installId,
-                        callCounts = toolCallCounts
+                        loopGuard = toolCallLoopGuard
                     )
                     request = request.copy(
                         messages = request.messages +
@@ -648,7 +680,7 @@ class ChatViewModel @Inject constructor(
         modelName: String?,
         tavilyApiKey: String?,
         installId: String,
-        callCounts: MutableMap<String, Int>
+        loopGuard: ToolCallLoopGuard
     ): List<ChatRequestMessage> =
         calls.map { call ->
             val result = executeSingleToolCall(
@@ -657,7 +689,7 @@ class ChatViewModel @Inject constructor(
                 modelName,
                 tavilyApiKey,
                 installId,
-                callCounts
+                loopGuard
             )
             ChatRequestMessage(
                 role = "tool",
@@ -672,7 +704,7 @@ class ChatViewModel @Inject constructor(
         modelName: String?,
         tavilyApiKey: String?,
         installId: String,
-        callCounts: MutableMap<String, Int>
+        loopGuard: ToolCallLoopGuard
     ): String {
         val toolName = call.displayName()
         val toolMessage = chatRepository.appendMessage(
@@ -683,12 +715,9 @@ class ChatViewModel @Inject constructor(
             modelName
         )
         return runCatching {
-            val fingerprint = "${call.name}:${call.arguments.trim()}"
-            val callCount = (callCounts[fingerprint] ?: 0) + 1
-            callCounts[fingerprint] = callCount
-            if (callCount > MaxRepeatedIdenticalToolCalls) {
+            if (!loopGuard.allow(call)) {
                 return@runCatching ToolExecutionOutcome(
-                    content = "Stopped repeated identical device action. Re-observe the screen or finish the task.",
+                    content = "Stopped a repeated identical tool loop. Use a different next action or finish the task.",
                     errorDetail = "Repeated identical tool call blocked."
                 )
             }
@@ -703,12 +732,18 @@ class ChatViewModel @Inject constructor(
                 AgentToolDefinitions.SetMediaVolumeToolName -> executeSetMediaVolumeTool(call.arguments)
                 AgentToolDefinitions.ForceStopAppToolName -> executeForceStopAppTool(call)
                 AgentToolDefinitions.ObserveScreenToolName ->
-                    deviceAssistantGateway.observeScreen().toToolOutcome()
+                    prepareForExternalUiAction {
+                        deviceAssistantGateway.observeScreen().toToolOutcome()
+                    }
                 AgentToolDefinitions.TapUiElementToolName -> executeTapUiElementTool(call.arguments)
                 AgentToolDefinitions.InputTextToolName -> executeInputTextTool(call.arguments)
                 AgentToolDefinitions.SwipeScreenToolName -> executeSwipeScreenTool(call.arguments)
-                AgentToolDefinitions.PressBackToolName -> deviceAssistantGateway.pressBack().toToolOutcome()
-                AgentToolDefinitions.PressHomeToolName -> deviceAssistantGateway.pressHome().toToolOutcome()
+                AgentToolDefinitions.PressBackToolName -> prepareForExternalUiAction {
+                    deviceAssistantGateway.pressBack().toToolOutcome()
+                }
+                AgentToolDefinitions.PressHomeToolName -> prepareForExternalUiAction {
+                    deviceAssistantGateway.pressHome().toToolOutcome()
+                }
                 else -> ToolExecutionOutcome(
                     content = "Unsupported tool: ${call.name}",
                     errorDetail = "Unsupported tool: ${call.name}"
@@ -848,7 +883,9 @@ class ChatViewModel @Inject constructor(
         val index = parseIntArgument(arguments, "index", minimum = 0)
             ?: return invalidDeviceToolArguments(AgentToolDefinitions.TapUiElementToolName, "index")
         val longPress = parseBooleanArgument(arguments, "long_press") ?: false
-        return deviceAssistantGateway.tapUiElement(index, longPress).toToolOutcome()
+        return prepareForExternalUiAction {
+            deviceAssistantGateway.tapUiElement(index, longPress).toToolOutcome()
+        }
     }
 
     private suspend fun executeInputTextTool(arguments: String): ToolExecutionOutcome {
@@ -857,7 +894,9 @@ class ChatViewModel @Inject constructor(
         val text = parseStringArgument(arguments, "text", allowBlank = true)
             ?: return invalidDeviceToolArguments(AgentToolDefinitions.InputTextToolName, "text")
         val clearExisting = parseBooleanArgument(arguments, "clear_existing") ?: true
-        return deviceAssistantGateway.inputText(index, text, clearExisting).toToolOutcome()
+        return prepareForExternalUiAction {
+            deviceAssistantGateway.inputText(index, text, clearExisting).toToolOutcome()
+        }
     }
 
     private suspend fun executeSwipeScreenTool(arguments: String): ToolExecutionOutcome {
@@ -867,7 +906,17 @@ class ChatViewModel @Inject constructor(
             }
             ?: return invalidDeviceToolArguments(AgentToolDefinitions.SwipeScreenToolName, "direction")
         val distance = parseIntArgument(arguments, "distance_percent", minimum = 20, maximum = 80) ?: 50
-        return deviceAssistantGateway.swipeScreen(direction, distance).toToolOutcome()
+        return prepareForExternalUiAction {
+            deviceAssistantGateway.swipeScreen(direction, distance).toToolOutcome()
+        }
+    }
+
+    private suspend fun prepareForExternalUiAction(
+        action: suspend () -> ToolExecutionOutcome
+    ): ToolExecutionOutcome {
+        floatingAssistantBridge.collapseForAutomation()
+        delay(OverlayAutomationCollapseDelayMillis)
+        return action()
     }
 
     private suspend fun awaitDeviceActionConfirmation(
@@ -1139,8 +1188,26 @@ class ChatViewModel @Inject constructor(
         const val IncrementalDisplayChunkSize = 8
         const val IncrementalDisplayDelayMillis = 18L
         const val BatchedReasoningToContentPauseMillis = 450L
+        const val OverlayAutomationCollapseDelayMillis = 160L
         const val MaxToolCallRounds = 8
-        const val MaxRepeatedIdenticalToolCalls = 2
+        const val MaxUiAutomationToolCallRounds = 24
+        const val MaxConsecutiveIdenticalToolCalls = 4
+        val UiAutomationToolNames = setOf(
+            AgentToolDefinitions.ObserveScreenToolName,
+            AgentToolDefinitions.TapUiElementToolName,
+            AgentToolDefinitions.InputTextToolName,
+            AgentToolDefinitions.SwipeScreenToolName,
+            AgentToolDefinitions.PressBackToolName,
+            AgentToolDefinitions.PressHomeToolName
+        )
+        val ConnectedShizukuStatuses = setOf(
+            com.flowchat.app.domain.device.ShizukuConnectionStatus.ConnectedAdb,
+            com.flowchat.app.domain.device.ShizukuConnectionStatus.ConnectedRoot
+        )
+        val PermissionRequestShizukuStatuses = setOf(
+            com.flowchat.app.domain.device.ShizukuConnectionStatus.PermissionRequired,
+            com.flowchat.app.domain.device.ShizukuConnectionStatus.PermissionDenied
+        )
         const val ToolCallPrefaceFallback = "好，我先调用相关工具看看。"
     }
 }
@@ -1157,3 +1224,21 @@ private data class ToolExecutionOutcome(
     val errorDetail: String? = null,
     val cancelled: Boolean = false
 )
+
+private class ToolCallLoopGuard(
+    private val maxConsecutiveIdenticalCalls: Int
+) {
+    private var previousFingerprint: String? = null
+    private var consecutiveIdenticalCalls = 0
+
+    fun allow(call: ChatToolCall): Boolean {
+        val fingerprint = "${call.name}:${call.arguments.trim()}"
+        consecutiveIdenticalCalls = if (fingerprint == previousFingerprint) {
+            consecutiveIdenticalCalls + 1
+        } else {
+            1
+        }
+        previousFingerprint = fingerprint
+        return consecutiveIdenticalCalls <= maxConsecutiveIdenticalCalls
+    }
+}
