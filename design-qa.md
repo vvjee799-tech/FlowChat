@@ -56,3 +56,27 @@
 ## Result
 
 final result: passed
+
+---
+
+# Floating Assistant Design QA
+
+## Scope
+
+- Reference: `C:\Users\LENOVO\.codex\generated_images\019ee4c3-8133-7a41-bcf2-82ab13fce493\exec-ee1b6562-22ae-4abb-ae6f-6bcc87414849.png`
+- Implementation: `E:\Codex\works\FlowChat\flowchat-overlay-refined2-live.png`
+- Comparison: `E:\Codex\works\FlowChat\build\flowchat-overlay-design-comparison.png`
+- State: dark external app, expanded assistant, active device tool, streaming response, stop control visible.
+- Viewport height: 1920 px for both captures.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: the emulator launcher content and aspect ratio differ from the generated short-video reference; the overlay proportions, hierarchy, colors, controls, and interaction state remain aligned.
+- Interaction checks: bubble tap, vertical drag, expand, collapse, composer input, send, tool-triggered auto-collapse, reopen, and stop were verified on `emulator-5554`.
+
+## Result
+
+final result: passed

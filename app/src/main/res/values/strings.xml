@@ -63,7 +63,6 @@
     <string name="background_settings">Background settings</string>
     <string name="background_light">Light</string>
     <string name="background_dark">Dark</string>
-    <string name="life_tools_permissions">Life tool permissions</string>
     <string name="app_usage_access">App usage access</string>
     <string name="permission_enabled">Enabled</string>
     <string name="permission_open">Open</string>
@@ -127,12 +126,12 @@
     <string name="thinking_done">Thought for %1$d sec</string>
     <string name="thinking_expand">Expand</string>
     <string name="thinking_collapse">Collapse</string>
-    <string name="upload_file">Upload text file</string>
+    <string name="upload_file">Upload file</string>
     <string name="remove_attachment">Remove attachment</string>
-    <string name="attachment_text_only">Only text files are supported.</string>
-    <string name="attachment_too_large">The file is larger than 256 KB.</string>
+    <string name="attachment_unsupported">This file format is not supported. Try TXT, PDF, DOCX, XLSX, PPTX, or OpenDocument.</string>
+    <string name="attachment_too_large">The file is larger than 20 MB.</string>
+    <string name="attachment_empty">No readable text was found in this file.</string>
     <string name="attachment_read_failed">Could not read this file.</string>
-    <string name="life_tools_summary">Choose what the assistant may access or open</string>
     <string name="life_tools_privacy_note">Disabled tools are not included in model requests.</string>
     <string name="app_usage_tool">App usage summary</string>
     <string name="app_usage_tool_description">Read screen time by app</string>
@@ -170,7 +169,10 @@
     <string name="open_navigation_drawer">Open navigation drawer</string>
     <string name="provider_configuration_invalid">Check the provider URL, name, and model.</string>
     <string name="device_assistant">Device assistant</string>
-    <string name="device_assistant_summary">Use authorized Shizuku and screen-control capabilities</string>
+    <string name="device_assistant_summary">Power mode and Shizuku connection</string>
+    <string name="power_mode">Power mode</string>
+    <string name="power_mode_description">Enable every device capability with one switch!</string>
+    <string name="shizuku_status">Shizuku connection</string>
     <string name="device_assistant_enabled">Enable device assistant</string>
     <string name="device_assistant_enabled_description">Allow the assistant to use authorized device-status and screen-control tools</string>
     <string name="force_stop_tool">Force stop apps</string>
@@ -223,4 +225,20 @@
     <string name="force_stop_confirmation_title">Force stop %1$s?</string>
     <string name="force_stop_confirmation_message">Unsaved work in %1$s may be lost.</string>
     <string name="continue_action">Continue</string>
+    <string name="floating_assistant">Floating assistant</string>
+    <string name="floating_assistant_description">Keep FlowChat beside other apps so you can follow progress and continue the conversation.</string>
+    <string name="floating_assistant_permission">Allow display over other apps</string>
+    <string name="floating_assistant_permission_required">Overlay permission is required before the assistant can appear outside FlowChat.</string>
+    <string name="floating_assistant_running">FlowChat assistant is ready</string>
+    <string name="floating_assistant_notification_description">Shows conversation progress while FlowChat works with another app.</string>
+    <string name="floating_assistant_browsing_app">Browsing %1$s</string>
+    <string name="floating_assistant_working">Working in the background</string>
+    <string name="floating_assistant_thinking">Thinking…</string>
+    <string name="floating_assistant_ready">I’m here when you want to continue.</string>
+    <string name="floating_assistant_ready_short">Ready</string>
+    <string name="floating_assistant_waiting">Waiting for the model</string>
+    <string name="floating_assistant_using_tool">Using %1$s</string>
+    <string name="floating_assistant_input_hint">Continue telling me…</string>
+    <string name="collapse_floating_assistant">Collapse floating assistant</string>
+    <string name="open_flowchat">Open FlowChat</string>
 </resources>

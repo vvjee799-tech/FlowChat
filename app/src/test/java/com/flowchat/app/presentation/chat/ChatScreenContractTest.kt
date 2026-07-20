@@ -12,24 +12,38 @@ import org.junit.Test
 
 class ChatScreenContractTest {
     @Test
-    fun appSettingsConsolidatesProviderLifeToolsMemoryAndLanguage() {
+    fun appSettingsConsolidatesLifeToolsIntoDeviceAssistant() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val drawerStart = source.indexOf("ModalDrawerSheet")
         val scaffoldStart = source.indexOf("Scaffold(", drawerStart)
         val drawerBlock = source.substring(drawerStart, scaffoldStart)
         val settingsStart = source.indexOf("private fun AppSettingsSheet(")
-        val settingsEnd = source.indexOf("private fun AppearanceDialog(", settingsStart)
+        val settingsEnd = source.indexOf("private fun DeviceAssistantDialog(", settingsStart)
         val settingsBlock = source.substring(settingsStart, settingsEnd)
+        val deviceAssistantStart = settingsEnd
+        val deviceAssistantEnd = source.indexOf(
+            "private fun DeviceActionConfirmationDialog(",
+            deviceAssistantStart
+        )
+        val deviceAssistantBlock = source.substring(deviceAssistantStart, deviceAssistantEnd)
 
         assertFalse(drawerBlock.contains("R.string.providers"))
         assertFalse(drawerBlock.contains("onOpenProviders()"))
         assertTrue(settingsBlock.contains("R.string.model_provider_configuration"))
-        assertTrue(settingsBlock.contains("R.string.life_tools_permissions"))
+        assertTrue(settingsBlock.contains("R.string.device_assistant"))
+        assertFalse(settingsBlock.contains("R.string.life_tools_permissions"))
         assertTrue(settingsBlock.contains("R.string.memory"))
         assertTrue(settingsBlock.contains("R.string.language"))
         assertTrue(settingsBlock.contains("R.string.appearance"))
         assertTrue(settingsBlock.contains("R.string.version"))
-        assertTrue(source.contains("private fun LifeToolsDialog("))
+        assertFalse(source.contains("showLifeToolsDialog"))
+        assertFalse(source.contains("private fun LifeToolsDialog("))
+        assertTrue(deviceAssistantBlock.contains("onPowerModeEnabledChange: (Boolean) -> Unit"))
+        assertTrue(deviceAssistantBlock.contains("appSettings.powerModeEnabled"))
+        assertFalse(deviceAssistantBlock.contains("onAppUsageToolEnabledChange: (Boolean) -> Unit"))
+        assertFalse(deviceAssistantBlock.contains("onRecentAppActivityToolEnabledChange: (Boolean) -> Unit"))
+        assertFalse(deviceAssistantBlock.contains("onOpenAppToolEnabledChange: (Boolean) -> Unit"))
+        assertFalse(deviceAssistantBlock.contains("R.string.life_tools_privacy_note"))
         assertTrue(source.contains("private fun MemoryManagerDialog("))
     }
 
@@ -423,15 +437,16 @@ class ChatScreenContractTest {
         assertTrue(sheetBlock.contains("R.string.model_provider_configuration"))
         assertFalse(sheetBlock.contains("R.string.profile_name"))
         assertFalse(sheetBlock.contains("R.string.background_settings"))
-        assertTrue(sheetBlock.contains("R.string.life_tools_permissions"))
+        assertTrue(sheetBlock.contains("R.string.device_assistant"))
+        assertFalse(sheetBlock.contains("R.string.life_tools_permissions"))
         assertFalse(sheetBlock.contains("R.string.app_usage_access"))
         assertFalse(sheetBlock.contains("R.string.permission_enabled"))
         assertFalse(sheetBlock.contains("R.string.permission_open"))
-        assertTrue(strings.contains("<string name=\"life_tools_permissions\">Life tool permissions</string>"))
+        assertFalse(strings.contains("name=\"life_tools_permissions\""))
         assertTrue(strings.contains("<string name=\"app_usage_access\">App usage access</string>"))
         assertTrue(strings.contains("<string name=\"permission_enabled\">Enabled</string>"))
         assertTrue(strings.contains("<string name=\"permission_open\">Open</string>"))
-        assertTrue(zhStrings.contains("name=\"life_tools_permissions\""))
+        assertFalse(zhStrings.contains("name=\"life_tools_permissions\""))
         assertTrue(zhStrings.contains("name=\"app_usage_access\""))
     }
 
@@ -904,7 +919,7 @@ class ChatScreenContractTest {
     }
 
     @Test
-    fun messageListAutoScrollsToLatestMessageWhenMessagesChange() {
+    fun messageListAnimatesOnlyForNewMessagesAndSnapsForStreamingUpdates() {
         val source = File("src/main/java/com/flowchat/app/presentation/chat/ChatScreen.kt").readText()
         val listStart = source.indexOf("private fun MessageList(")
         val listEnd = source.indexOf("@OptIn(ExperimentalFoundationApi::class)", listStart)
@@ -914,8 +929,11 @@ class ChatScreenContractTest {
         assertTrue(source.contains("import androidx.compose.foundation.lazy.rememberLazyListState"))
         assertTrue(listBlock.contains("val listState = rememberLazyListState()"))
         assertTrue(listBlock.contains("val lastMessage = messages.lastOrNull()"))
-        assertTrue(listBlock.contains("LaunchedEffect(messages.size, lastMessage?.id, lastMessage?.content, lastMessage?.reasoningContent)"))
+        assertTrue(listBlock.contains("LaunchedEffect(messages.size, lastMessage?.id)"))
         assertTrue(listBlock.contains("listState.animateScrollToItem(messages.size)"))
+        assertTrue(listBlock.contains("LaunchedEffect(lastMessage?.content, lastMessage?.reasoningContent)"))
+        assertTrue(listBlock.contains("listState.scrollToItem(messages.size)"))
+        assertFalse(listBlock.contains("LaunchedEffect(messages.size, lastMessage?.id, lastMessage?.content, lastMessage?.reasoningContent)"))
         assertTrue(listBlock.contains("state = listState"))
         assertTrue(listBlock.contains("item(key = BottomMessageAnchorKey)"))
         assertTrue(source.contains("private const val BottomMessageAnchorKey = \"bottom-message-anchor\""))

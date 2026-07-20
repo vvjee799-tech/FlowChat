@@ -102,8 +102,18 @@ class ShizukuDeviceAssistantGateway @Inject constructor(
 
     override fun refreshConnection() {
         scope.launch {
-            mutableConnectionState.value = inspectConnection()
-            if (mutableConnectionState.value.status == ShizukuConnectionStatus.Connecting) {
+            if (hasLiveUserService()) {
+                probeConnectedService()
+                return@launch
+            }
+            service = null
+            val inspectedState = inspectConnection()
+            if (hasLiveUserService()) {
+                probeConnectedService()
+                return@launch
+            }
+            mutableConnectionState.value = inspectedState
+            if (inspectedState.status == ShizukuConnectionStatus.Connecting) {
                 bindService()
             }
         }
@@ -186,6 +196,13 @@ class ShizukuDeviceAssistantGateway @Inject constructor(
         } else {
             result
         }
+    }
+
+    override suspend fun enablePowerMode(): DeviceToolResult {
+        val result = callService { it.enablePowerMode() }
+        delay(PowerModeRefreshDelayMillis)
+        refreshAccessibilityConnection()
+        return result
     }
 
     override suspend fun observeScreen(): DeviceToolResult {
@@ -331,7 +348,12 @@ class ShizukuDeviceAssistantGateway @Inject constructor(
     }
 
     private fun bindService() {
-        if (service != null || !binding.compareAndSet(false, true)) return
+        if (hasLiveUserService()) {
+            scope.launch { probeConnectedService() }
+            return
+        }
+        service = null
+        if (!binding.compareAndSet(false, true)) return
         mutableConnectionState.value = ShizukuConnectionState(ShizukuConnectionStatus.Connecting)
         runCatching {
             Shizuku.bindUserService(userServiceArgs, serviceConnection)
@@ -355,13 +377,20 @@ class ShizukuDeviceAssistantGateway @Inject constructor(
                 } else {
                     ShizukuConnectionStatus.ConnectedAdb
                 },
-                capabilities = capabilities
+                capabilities = capabilities + if (FlowChatAccessibilityService.current() != null) {
+                    AccessibilityCapabilities
+                } else {
+                    emptySet()
+                }
             )
         }.onFailure { error ->
             service = null
             mutableConnectionState.value = errorState(error)
         }
     }
+
+    private fun hasLiveUserService(): Boolean =
+        service?.asBinder()?.isBinderAlive == true
 
     private suspend fun callService(
         operation: (IFlowChatShizukuService) -> String
@@ -472,6 +501,7 @@ class ShizukuDeviceAssistantGateway @Inject constructor(
         const val PermissionRequestCode = 6201
         const val ServiceConnectionTimeoutMillis = 5_000L
         const val PostActionObservationDelayMillis = 400L
+        const val PowerModeRefreshDelayMillis = 350L
         val AccessibilityCapabilities = setOf(
             DeviceCapability.ScreenObservation,
             DeviceCapability.UiElementAction,
